@@ -55,7 +55,7 @@ class Listener(Leap.Listener):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
 
-        
+
         FramesLock.acquire()
         if len(LeapMotionFrames) < 1000:
             LeapMotionFrames.append(frame)
@@ -187,7 +187,54 @@ class RavenController:
         self.LeapMotionListener = Listener()           
         controller = Leap.Controller()
         controller.add_listener(listener)                   
+        while True:
+            self.publishCommand()
 
+    def calculateTransform(self, prevFrame, currFrame):
+        # takes a previous leap motion frame and a current leapmotion frame and calculates the transform between them
+        if not prevFrame.hands.empty: #FIXME WILL NEED TO GENERALIZE FOR TWO HANDS
+            prevHand = prevFrame.hands[0]
+        if not currFrame.hands.empty: 
+            currHand = currFrame.hands[0]
+        """prev_palm_pos = prevFrame.palm_position
+        curr_palm_pos = currFrame.palm_position
+        prev_palm_ori = (prevHand.normal.roll, prevHand.direction.pitch, prevHand.direction.yaw)
+        curr_palm_ori = (currHand.normal.roll, currHand.direction.pitch, currHand.direction.yaw)"""
+        translation = currHand.translation(prevFrame) #this is a Leap.Vector!!
+        rot_matrix  = currHand.rotation(prevFrame) # this is a Leap.Matrix!!
+
+    def publishCommand(self):
+        if len(LeapMotionFrames)>0:
+            frame = LeapMotionFrames[-1] #get the latest frame
+
+            raven_command = RavenCommand()
+            raven_command.header.stamp = rospy.Time.now()
+            raven_command.header.frame_id = BASE_FRAME
+            raven_command.controller = Constants.CONTROLLER_CARTESIAN_SPACE #FIXME: need to find where this is and stick it in the proper place
+            active = [False, False]
+            for i in xrange(2):
+                if SIDE_ACTIVE[i]:
+                    active[i] = True
+
+            for i in xrange(2):
+                arm_cmd = ArmCommand()
+                tool_cmd = ToolCommand()
+                tool_cmd.pose_option = ToolCommand.POSE_OFF
+
+                try:
+                        (trans,rot) = self.listener.lookupTransform(BASE_FRAME, END_EFFECTOR_FRAME_PREFIX + END_EFFECTOR_FRAME_SUFFIX[i], rospy.Time(0))
+                    except (tf.LookupException, tf.ConnectivityException):
+                        if i==0:
+                            print "no transform for left arm!"
+                        else:
+                            print "no transform for right!"
+                        return
+                    xcur, ycur, zcur = trans[0],trans[1],trans[2]
+                    xcmd, ycmd, zcmd = (paddle.transform.translation.x * self.scale,
+                                        paddle.transform.translation.y * self.scale,
+                                        paddle.transform.translation.z * self.scale)
+
+                    self.xoffset, self.yoffset, self.zoffset = xcur-xcmd, ycur-ycmd, zcur-zcmd
 
 
 def main():
