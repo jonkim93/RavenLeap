@@ -1,10 +1,3 @@
-################################################################################
-# Copyright (C) 2012-2013 Leap Motion, Inc. All rights reserved.               #
-# Leap Motion proprietary and confidential. Not for distribution.              #
-# Use subject to the terms of the Leap Motion SDK Agreement available at       #
-# https://developer.leapmotion.com/sdk_agreement, or another agreement         #
-# between Leap Motion and you, your company or other organization.             #
-################################################################################
 
 import Leap, sys
 import roslib; roslib.load_manifest("raven_2_teleop")
@@ -80,7 +73,7 @@ class Listener(Leap.Listener):
 
 class RavenController:
     def __init__(self, listener, scale=None, frame=None, relative_orientation=False, camera_frame=False):
-        self.pub = rospy.Publisher('raven_command', RavenCommand)
+        self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
         self.listener = listener
         self.scale = scale
         self.scale_increment = scale/20
@@ -112,34 +105,44 @@ class RavenController:
                 continue            
         self.LeapMotionListener = Listener()           
         controller = Leap.Controller()
-        controller.add_listener(listener)                   
+        controller.add_listener(listener)     
+
         while True:
-            self.publishCommand()
+            raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
+            self.raven_pub.publish(raven_command)
 
-    def calculateTransform(self, prev, curr):
+        # Remove the sample listener when done
+        controller.remove_listener(listener)        
+
+    def getRavenCommand(self):
         """
-        Helper method for calculating the transform between two leapmotion frames 
-
-        returns translation, rot_matrix of types Leap.Vector and Leap.Matrix
+        Calculates a raven command based off of LeapMotion frames
         """
-        if not prevFrame.hands.empty: #FIXME WILL NEED TO GENERALIZE FOR TWO HANDS
-            prevHand = prev.hands[0]
-        if not currFrame.hands.empty: 
-            currHand = curr.hands[0]
-        """prev_palm_pos = prevFrame.palm_position
-        curr_palm_pos = currFrame.palm_position
-        prev_palm_ori = (prevHand.normal.roll, prevHand.direction.pitch, prevHand.direction.yaw)
-        curr_palm_ori = (currHand.normal.roll, currHand.direction.pitch, currHand.direction.yaw)"""
-        translation = currHand.translation(prevFrame) #this is a Leap.Vector!!
-        rot_matrix  = currHand.rotation(prevFrame) # this is a Leap.Matrix!!
-        return translation, rot_matrix
+        raven_command = RavenCommand()
+        raven_command.header.stamp = rospy.Time.now()
+        raven_command.header.frame_id = BASE_FRAME
+                
+        raven_command.controller = Constants.CONTROLLER_CARTESIAN_SPACE
+        leftArmCommand = self.getArmCommand(0)
+        rightArmCommand = self.getArmCommand(1)
+        raven_command.arm_names = ['left', 'right']
+        raven_command.arms = [leftArmCommand, rightArmCommand]
 
-    def getArmCommand(self, arm):#FIXME: right now doesn't use the arm index
+        #FIXME: need to account for pedal down and up in leapmotion commands
+        raven_command.pedal_down = True
+        return raven_command
+
+
+    def getArmCommand(self, arm):
         """
         Given an arm index, calculates and returns the proper arm command based off of the LeapMotion frames 
         """
-        if prevFrame != None and currFrame != None:
-            translation, rot_matrix = self.calculateTransform(prevFrame, currFrame)
+        FramesLock.acquire()
+        p = prevFrame
+        c = currFrame
+        FramesLock.release()
+        if p != None and c != None:
+            translation, rot_matrix = calculateTransform(p, c, arm)
             arm_cmd = ArmCommand()
             tool_cmd = ToolCommand()
             tool_cmd.pose_option = ToolCommand.POSE_OFF
@@ -152,11 +155,13 @@ class RavenController:
                 else:
                     print "no transform for right!"
                 return
+            xx, yy, zz, ww = (1, 0, 0, 0)  #FIXME: identity quaternion for now; will replace once we start focusing on 
+            print "dx: "+dx+"  dy: "+dy+"  dz: "+dz+"\n"
+
+            #FIXME: this stuff is probably wrong
             dx, dy, dz = (translation.x*self.scale, 
                         translation.y*self.scale, 
                         translation.z*self.scale)
-            xx, yy, zz, ww = (1, 0, 0, 0)  #FIXME: identity quaternion for now; will replace once we start focusing on 
-            print "dx: "+dx+"  dy: "+dy+"  dz: "+dz+"\n"
             p = mat(array([dx,dy,dz,1])).transpose()
             T1 = mat(array([[0,1,0,0],  [-1,0,0,0],  [0,0, 1,0], [0,0,0,1]]))
             p_t = array(T1 * p)[0:3].flatten().tolist()
@@ -179,7 +184,23 @@ class RavenController:
             return
 
 
-    
+def calculateTransform(prev, curr, index):
+    """
+    Static helper method for calculating the transform between two leapmotion frames 
+
+    returns translation, rot_matrix of types Leap.Vector and Leap.Matrix
+    """
+    if not prev.hands.empty: #FIXME WILL NEED TO GENERALIZE FOR TWO HANDS
+        prevHand = prev.hands[index]
+    if not curr.hands.empty: 
+        currHand = curr.hands[index]
+    """prev_palm_pos = prev.palm_position
+    curr_palm_pos = curr.palm_position
+    prev_palm_ori = (prevHand.normal.roll, prevHand.direction.pitch, prevHand.direction.yaw)
+    curr_palm_ori = (currHand.normal.roll, currHand.direction.pitch, currHand.direction.yaw)"""
+    translation = currHand.translation(prev) #this is a Leap.Vector!!
+    rot_matrix  = currHand.rotation(prev) # this is a Leap.Matrix!!
+    return translation, rot_matrix    
 
 
 def main():
