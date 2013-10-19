@@ -28,7 +28,8 @@ SIDE_ACTIVE = [True,False]
 SIDE_NAMES = ['L','R']
 SIDE_NAMES_FRIENDLY = ['left','right']
 
-LeapMotionFrames = []
+prevFrame = None
+currFrame = None
 FramesLock = threading.Lock()
 
 class Listener(Leap.Listener):
@@ -51,94 +52,6 @@ class Listener(Leap.Listener):
     def on_exit(self, controller):
         print "Exited"
 
-    def on_frame(self, controller):
-        # Get the most recent frame and report some basic information
-        frame = controller.frame()
-
-
-        FramesLock.acquire()
-        if len(LeapMotionFrames) < 1000:
-            LeapMotionFrames.append(frame)
-        else:
-            LeapMotionFrames = LeapMotionFrames[500:]
-            LeapMotionFrames.append(frame)
-        FramesLock.release()
-
-
-        print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d, gestures: %d" % (
-              frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools), len(frame.gestures()))
-
-        if not frame.hands.empty:
-            # Get the first hand
-            hand = frame.hands[0]
-
-            # Check if the hand has any fingers
-            fingers = hand.fingers
-            if not fingers.empty:
-                # Calculate the hand's average finger tip position
-                avg_pos = Leap.Vector()
-                for finger in fingers:
-                    avg_pos += finger.tip_position
-                avg_pos /= len(fingers)
-                print "Hand has %d fingers, average finger tip position: %s" % (
-                      len(fingers), avg_pos)
-
-            # Get the hand's sphere radius and palm position
-            print "Hand sphere radius: %f mm, palm position: %s" % (
-                  hand.sphere_radius, hand.palm_position)
-
-            # Get the hand's normal vector and direction
-            normal = hand.palm_normal
-            direction = hand.direction
-
-            # Calculate the hand's pitch, roll, and yaw angles
-            print "Hand pitch: %f degrees, roll: %f degrees, yaw: %f degrees" % (
-                direction.pitch * Leap.RAD_TO_DEG,
-                normal.roll * Leap.RAD_TO_DEG,
-                direction.yaw * Leap.RAD_TO_DEG)
-
-            # Gestures
-            for gesture in frame.gestures():
-                if gesture.type == Leap.Gesture.TYPE_CIRCLE:
-                    circle = CircleGesture(gesture)
-
-                    # Determine clock direction using the angle between the pointable and the circle normal
-                    if circle.pointable.direction.angle_to(circle.normal) <= Leap.PI/4:
-                        clockwiseness = "clockwise"
-                    else:
-                        clockwiseness = "counterclockwise"
-
-                    # Calculate the angle swept since the last frame
-                    swept_angle = 0
-                    if circle.state != Leap.Gesture.STATE_START:
-                        previous_update = CircleGesture(controller.frame(1).gesture(circle.id))
-                        swept_angle =  (circle.progress - previous_update.progress) * 2 * Leap.PI
-
-                    print "Circle id: %d, %s, progress: %f, radius: %f, angle: %f degrees, %s" % (
-                            gesture.id, self.state_string(gesture.state),
-                            circle.progress, circle.radius, swept_angle * Leap.RAD_TO_DEG, clockwiseness)
-
-                if gesture.type == Leap.Gesture.TYPE_SWIPE:
-                    swipe = SwipeGesture(gesture)
-                    print "Swipe id: %d, state: %s, position: %s, direction: %s, speed: %f" % (
-                            gesture.id, self.state_string(gesture.state),
-                            swipe.position, swipe.direction, swipe.speed)
-
-                if gesture.type == Leap.Gesture.TYPE_KEY_TAP:
-                    keytap = KeyTapGesture(gesture)
-                    print "Key Tap id: %d, %s, position: %s, direction: %s" % (
-                            gesture.id, self.state_string(gesture.state),
-                            keytap.position, keytap.direction )
-
-                if gesture.type == Leap.Gesture.TYPE_SCREEN_TAP:
-                    screentap = ScreenTapGesture(gesture)
-                    print "Screen Tap id: %d, %s, position: %s, direction: %s" % (
-                            gesture.id, self.state_string(gesture.state),
-                            screentap.position, screentap.direction )
-
-        if not (frame.hands.empty and frame.gestures().empty):
-            print ""
-
     def state_string(self, state):
         if state == Leap.Gesture.STATE_START:
             return "STATE_START"
@@ -151,6 +64,19 @@ class Listener(Leap.Listener):
 
         if state == Leap.Gesture.STATE_INVALID:
             return "STATE_INVALID"
+
+    def on_frame(self, controller):
+        # Get the most recent frame and report some basic information
+        frame = controller.frame()
+        FramesLock.acquire()
+        if prevFrame == None:
+            currFrame = frame
+        else:
+            prevFrame = currFrame
+            currFrame = frame
+        FramesLock.release()
+
+    
 
 class RavenController:
     def __init__(self, listener, scale=None, frame=None, relative_orientation=False, camera_frame=False):
@@ -190,51 +116,70 @@ class RavenController:
         while True:
             self.publishCommand()
 
-    def calculateTransform(self, prevFrame, currFrame):
-        # takes a previous leap motion frame and a current leapmotion frame and calculates the transform between them
+    def calculateTransform(self, prev, curr):
+        """
+        Helper method for calculating the transform between two leapmotion frames 
+
+        returns translation, rot_matrix of types Leap.Vector and Leap.Matrix
+        """
         if not prevFrame.hands.empty: #FIXME WILL NEED TO GENERALIZE FOR TWO HANDS
-            prevHand = prevFrame.hands[0]
+            prevHand = prev.hands[0]
         if not currFrame.hands.empty: 
-            currHand = currFrame.hands[0]
+            currHand = curr.hands[0]
         """prev_palm_pos = prevFrame.palm_position
         curr_palm_pos = currFrame.palm_position
         prev_palm_ori = (prevHand.normal.roll, prevHand.direction.pitch, prevHand.direction.yaw)
         curr_palm_ori = (currHand.normal.roll, currHand.direction.pitch, currHand.direction.yaw)"""
         translation = currHand.translation(prevFrame) #this is a Leap.Vector!!
         rot_matrix  = currHand.rotation(prevFrame) # this is a Leap.Matrix!!
+        return translation, rot_matrix
 
-    def publishCommand(self):
-        if len(LeapMotionFrames)>0:
-            frame = LeapMotionFrames[-1] #get the latest frame
+    def getArmCommand(self, arm):#FIXME: right now doesn't use the arm index
+        """
+        Given an arm index, calculates and returns the proper arm command based off of the LeapMotion frames 
+        """
+        if prevFrame != None and currFrame != None:
+            translation, rot_matrix = self.calculateTransform(prevFrame, currFrame)
+            arm_cmd = ArmCommand()
+            tool_cmd = ToolCommand()
+            tool_cmd.pose_option = ToolCommand.POSE_OFF
 
-            raven_command = RavenCommand()
-            raven_command.header.stamp = rospy.Time.now()
-            raven_command.header.frame_id = BASE_FRAME
-            raven_command.controller = Constants.CONTROLLER_CARTESIAN_SPACE #FIXME: need to find where this is and stick it in the proper place
-            active = [False, False]
-            for i in xrange(2):
-                if SIDE_ACTIVE[i]:
-                    active[i] = True
+            try:
+                (trans, rot) = self.listener.lookupTransform(BASE_FRAME, END_EFFECTOR_FRAME_PREFIX+END_EFFECTOR_FRAME_SUFFIX[i], rospy.Time(0))
+            except (tf.LookupException, tf.ConnectivityException):
+                if i==0:
+                    print "no transform for left arm!"
+                else:
+                    print "no transform for right!"
+                return
+            dx, dy, dz = (translation.x*self.scale, 
+                        translation.y*self.scale, 
+                        translation.z*self.scale)
+            xx, yy, zz, ww = (1, 0, 0, 0)  #FIXME: identity quaternion for now; will replace once we start focusing on 
+            print "dx: "+dx+"  dy: "+dy+"  dz: "+dz+"\n"
+            p = mat(array([dx,dy,dz,1])).transpose()
+            T1 = mat(array([[0,1,0,0],  [-1,0,0,0],  [0,0, 1,0], [0,0,0,1]]))
+            p_t = array(T1 * p)[0:3].flatten().tolist()
 
-            for i in xrange(2):
-                arm_cmd = ArmCommand()
-                tool_cmd = ToolCommand()
-                tool_cmd.pose_option = ToolCommand.POSE_OFF
+            qmat = T1 * mat(tft.quaternion_matrix(array([xx,yy,zz,ww])))
+            q_t = array(tft.quaternion_from_matrix(qmat)).flatten().tolist()
+            tool_cmd.pose_option = ToolCommand.POSE_RELATIVE #FIXME: this sets the toolcommand to relative pose commands; user should be able to specify
 
-                try:
-                        (trans,rot) = self.listener.lookupTransform(BASE_FRAME, END_EFFECTOR_FRAME_PREFIX + END_EFFECTOR_FRAME_SUFFIX[i], rospy.Time(0))
-                    except (tf.LookupException, tf.ConnectivityException):
-                        if i==0:
-                            print "no transform for left arm!"
-                        else:
-                            print "no transform for right!"
-                        return
-                    xcur, ycur, zcur = trans[0],trans[1],trans[2]
-                    xcmd, ycmd, zcmd = (paddle.transform.translation.x * self.scale,
-                                        paddle.transform.translation.y * self.scale,
-                                        paddle.transform.translation.z * self.scale)
+            tool_cmd.pose = Pose(Point(*p_t),Quaternion(*q_t))
 
-                    self.xoffset, self.yoffset, self.zoffset = xcur-xcmd, ycur-ycmd, zcur-zcmd
+            #FIXME: will need to add in grip commands later
+
+            arm_cmd.tool_command = tool_cmd
+            return arm_cmd
+        else:
+            if currFrame == None:
+                print "currFrame equals none"
+            if prevFrame == None:
+                print "prevFrame equals none"
+            return
+
+
+    
 
 
 def main():
