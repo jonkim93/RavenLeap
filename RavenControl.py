@@ -11,6 +11,7 @@ from raven_2_msgs.msg import *
 from geometry_msgs.msg import Pose, Point, Quaternion
 from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
 from optparse import OptionParser
+import openravepy as rave
 
 from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 
@@ -72,11 +73,18 @@ class Listener(Leap.Listener):
     
 
 class RavenController:
-    def __init__(self, listener, scale=None, frame=None, relative_orientation=False, camera_frame=False):
+    def __init__(self, scale=0.1, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
-        self.listener = listener
         self.scale = scale
         self.scale_increment = scale/20
+        env = rave.Environment()
+        env.Load('myRaven.xml')
+        self.robot = robot.GetRobots()[0]
+        self.manipulators = robot.GeManipulators()
+        manip = manipulators[0]
+        manipIndices = manip.GetArmIndices()
+        # set joint values
+        # robot.SetJointsValues(jointPositionArray, jointIndicesArray)
         if frame:
             self.frame = frame
         else:
@@ -204,19 +212,7 @@ def calculateTransform(prev, curr, index):
 
 
 def main():
-    # Create a sample listener and controller
-    listener = Listener()
-    controller = Leap.Controller()
-
-    # Have the sample listener receive events from the controller
-    controller.add_listener(listener)
-
-    # Keep this process running until Enter is pressed
-    print "Press Enter to quit..."
-    sys.stdin.readline()
-
-    # Remove the sample listener when done
-    controller.remove_listener(listener)
+    rc = RavenController()
 
 
 if __name__ == "__main__":
