@@ -2,23 +2,32 @@
 #TODO: download TFX
 #TODO: make sure function calls are correct
 #TODO: figure out pose type and how to change it translationally
+#TODO: check joint limits and make sure they're not being hit
 
+#====== LEAP =============#
 import Leap, sys
-#import roslib; roslib.load_manifest("raven_2_teleop")
-#import rospy
+from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
+
+#====== GENERAL ==========#
 import math
 from numpy import *
 from numpy.linalg import *
+from optparse import OptionParser
+
+#====== ROS ==============#
 import tf
 import tf.transformations as tft
+from RavenKin import *
+#import roslib; roslib.load_manifest("raven_2_teleop")
+#import rospy
 #from raven_2_msgs.msg import *
 #from geometry_msgs.msg import Pose, Point, Quaternion
 #from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
-from optparse import OptionParser
-import openravepy as rave
-from RavenKin import *
 
-from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
+#====== OPENRAVE =========#
+import openravepy as rave
+
+
 
 BASE_FRAME = '/0_link'
 END_EFFECTOR_FRAME_PREFIX = '/tool_'
@@ -95,19 +104,6 @@ class RavenController:
         controller = Leap.Controller()
         controller.add_listener(listener)     
 
-        if MODE == "REAL":
-            while True:
-                raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
-                self.raven_pub.publish(raven_command)
-        elif MODE == "SIM":
-            self.configureOREnv()
-            while True:
-                joints = self.getORCommand()
-                self.publishORCommand(joints)
-
-        # Remove the sample listener when done
-        controller.remove_listener(listener)   
-
         """if frame:
             self.frame = frame
         else:
@@ -135,8 +131,21 @@ class RavenController:
             except tf.Exception, e:
                 continue            """     
 
+    def run(self):
+        if MODE == "REAL":
+            while True:
+                raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
+                self.raven_pub.publish(raven_command)
+        elif MODE == "SIM":
+            self.configureOREnv()
+            while True:
+                joints = self.getORCommand()
+                self.publishORCommand(joints)
 
-    #================ OPEN RAVE COMMANDS ====================#
+        # Remove the sample listener when done
+        controller.remove_listener(listener)   
+
+    #========================== OPEN RAVE COMMANDS ================================#
 
     def configureOREnv(self):
         env = rave.Environment()
@@ -160,7 +169,6 @@ class RavenController:
         #set joint values
         self.robot.SetJointsValues(joints, JOINTS_ARRAY_INDICES)
 
-
     def getORCommand(self):
         FramesLock.acquire()
         p = prevFrame
@@ -177,8 +185,7 @@ class RavenController:
 
     
 
-
-    #=============== ROBOT/ROS COMMANDS =================#
+    #========================== ROBOT/ROS COMMANDS =================================#
 
     def getRavenCommand(self):
         """
@@ -270,7 +277,7 @@ def calculateTransform(prev, curr, index):
 #================= MAIN ================#
 def main():
     rc = RavenController()
-
+    rc.run()
 
 if __name__ == "__main__":
     main()
