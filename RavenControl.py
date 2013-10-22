@@ -1,17 +1,22 @@
 
+#TODO: download TFX
+#TODO: make sure function calls are correct
+#TODO: figure out pose type and how to change it translationally
+
 import Leap, sys
-import roslib; roslib.load_manifest("raven_2_teleop")
-import rospy
+#import roslib; roslib.load_manifest("raven_2_teleop")
+#import rospy
 import math
 from numpy import *
 from numpy.linalg import *
 import tf
 import tf.transformations as tft
-from raven_2_msgs.msg import *
-from geometry_msgs.msg import Pose, Point, Quaternion
-from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
+#from raven_2_msgs.msg import *
+#from geometry_msgs.msg import Pose, Point, Quaternion
+#from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
 from optparse import OptionParser
 import openravepy as rave
+from RavenKin import *
 
 from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 
@@ -22,10 +27,18 @@ SIDE_ACTIVE = [True,False]
 SIDE_NAMES = ['L','R']
 SIDE_NAMES_FRIENDLY = ['left','right']
 
+#========================= CONSTANTS ============================#
+MODE = "SIM" # or "REAL"
+ARM = "ONE_ARM" # or "TWO_ARM"
+MODEL_NAME = "myRaven.xml" 
+
+JOINTS_ARRAY_INDICES = [SHOULDER, ELBOW, Z_INS, TOOL_ROT, WRIST, GRASP1, GRASP2, YAW, GRASP]
+
 prevFrame = None
 currFrame = None
 FramesLock = threading.Lock()
 
+#========================= LEAP MOTION LISTENER CLASS ======================================================#
 class Listener(Leap.Listener):
     def on_init(self, controller):
         print "Initialized"
@@ -71,21 +84,31 @@ class Listener(Leap.Listener):
         FramesLock.release()
 
     
-
+#========================= RAVEN CONTROLLER CLASS ==========================================================#
 class RavenController:
     def __init__(self, scale=0.1, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
         self.scale = scale
         self.scale_increment = scale/20
-        env = rave.Environment()
-        env.Load('myRaven.xml')
-        self.robot = robot.GetRobots()[0]
-        self.manipulators = robot.GeManipulators()
-        manip = manipulators[0]
-        manipIndices = manip.GetArmIndices()
-        # set joint values
-        # robot.SetJointsValues(jointPositionArray, jointIndicesArray)
-        if frame:
+        
+        self.LeapMotionListener = Listener()           
+        controller = Leap.Controller()
+        controller.add_listener(listener)     
+
+        if MODE == "REAL":
+            while True:
+                raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
+                self.raven_pub.publish(raven_command)
+        elif MODE == "SIM":
+            self.configureOREnv()
+            while True:
+                joints = self.getORCommand()
+                self.publishORCommand(joints)
+
+        # Remove the sample listener when done
+        controller.remove_listener(listener)   
+
+        """if frame:
             self.frame = frame
         else:
             self.frame = BASE_FRAME
@@ -110,17 +133,52 @@ class RavenController:
                 self.listener.waitForTransform(BASE_FRAME, end_effector_frame, rospy.Time(0), rospy.Duration(5.0))
                 break
             except tf.Exception, e:
-                continue            
-        self.LeapMotionListener = Listener()           
-        controller = Leap.Controller()
-        controller.add_listener(listener)     
+                continue            """     
 
-        while True:
-            raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
-            self.raven_pub.publish(raven_command)
 
-        # Remove the sample listener when done
-        controller.remove_listener(listener)        
+    #================ OPEN RAVE COMMANDS ====================#
+
+    def configureOREnv(self):
+        env = rave.Environment()
+        env.Load('myRaven.xml')
+        self.robot = robot.GetRobots()[0]
+        self.manipulators = robot.GetManipulators()
+        manip = manipulators[0]
+        manipIndices = manip.GetArmIndices()
+
+        # NOT SURE ABOUT FUNCTION CALL NAMES 
+        allJoints = robot.GetJoints()
+        jointIndices = manip.GetArmIndices()
+        print "JOINTINDICES: "+jointIndices
+        manipJoints = [allJoints[i] for i in jointIndices]
+        manipJointValues = [manipJoint.GetDOFValue() for manipJoint in manipJoints]
+        print "MANIPJOINTVALUES: "+manipJointValues
+        #FIXME: look at this
+        self.prevPose = fwdArmKin(0, manipJointValues) 
+
+    def publishORCommand(self, joints):
+        #set joint values
+        self.robot.SetJointsValues(joints, JOINTS_ARRAY_INDICES)
+
+
+    def getORCommand(self):
+        FramesLock.acquire()
+        p = prevFrame
+        c = currFrame
+        FramesLock.release()
+        prevPose = self.prevPose
+        print "prevPose: "+str(prevPose)
+        if p != None and c != None:
+            translation = calculateTransform(p, c, arm)
+            #BASED OFF THIS TRANSLATION, WE NEED TO DIRECTLY CHANGE THE POSE SOMEHOW. HOWWW???
+            dx, dy, dz = (translation.x*self.scale, 
+                        translation.y*self.scale, 
+                        translation.z*self.scale)
+
+    
+
+
+    #=============== ROBOT/ROS COMMANDS =================#
 
     def getRavenCommand(self):
         """
@@ -139,7 +197,6 @@ class RavenController:
         #FIXME: need to account for pedal down and up in leapmotion commands
         raven_command.pedal_down = True
         return raven_command
-
 
     def getArmCommand(self, arm):
         """
@@ -176,7 +233,7 @@ class RavenController:
 
             qmat = T1 * mat(tft.quaternion_matrix(array([xx,yy,zz,ww])))
             q_t = array(tft.quaternion_from_matrix(qmat)).flatten().tolist()
-            tool_cmd.pose_option = ToolCommand.POSE_RELATIVE #FIXME: this sets the toolcommand to relative pose commands; user should be able to specify
+            tool_cmd.pose_option = ToolCommand.POSE_RELATIVE #FIXME: this sets the toolcommand to relative pose commands
 
             tool_cmd.pose = Pose(Point(*p_t),Quaternion(*q_t))
 
@@ -191,7 +248,7 @@ class RavenController:
                 print "prevFrame equals none"
             return
 
-
+#========== HELPER FUNCTIONS ==========#
 def calculateTransform(prev, curr, index):
     """
     Static helper method for calculating the transform between two leapmotion frames 
@@ -210,7 +267,7 @@ def calculateTransform(prev, curr, index):
     rot_matrix  = currHand.rotation(prev) # this is a Leap.Matrix!!
     return translation, rot_matrix    
 
-
+#================= MAIN ================#
 def main():
     rc = RavenController()
 
