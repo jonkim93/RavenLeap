@@ -57,6 +57,28 @@ YAW        =8
 GRASP      =9
 
 JOINTS_ARRAY_INDICES = [SHOULDER, ELBOW, Z_INS, TOOL_ROT, WRIST, GRASP1, GRASP2, YAW, GRASP]
+ROS_TO_L_OR = {0:2,
+               1:3,
+               2:4,
+               4:5,
+               5:6,
+               6:8,
+               7:10,
+               8:7,
+               9:9
+               } 
+ROS_TO_R_OR = {}
+L_OR_TO_ROS = {2:0, # shoulder_L --> shoulder
+               3:1, # elbow_L --> elbow
+               4:2, # insertion_L--> z_ins
+               5:4, # tool_roll_L--> tool_rot
+               6:5, # wrist_joint_L--> wrist
+               8:6, # grasper_joint_1_L --> grasp1
+               10:7, #grasper_joint_2_L --> grasp2
+               7:8, #grasper_yaw_L --> yaw
+               9:9, #grasper1_tip_L --> grasp
+               }
+R_OR_TO_ROS = {}
 
 prevFrame = None
 currFrame = None
@@ -88,7 +110,6 @@ class Listener(Leap.Listener):
         self.prevFrame = None
         self.currFrame = None
         self.rc = RavenController()
-        print "here!!!!"
 
     def on_connect(self, controller):
         print "Connected"
@@ -141,8 +162,8 @@ class RavenController:
             raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
             self.raven_pub.publish(raven_command)
         elif MODE == "SIM":
-            joints = self.getORCommand(p, c)
-            self.publishORCommand(joints)  
+            joints, joints_array_indices = self.getORCommand(p, c)
+            self.publishORCommand(joints, joints_array_indices)  
 
     #========================== OPEN RAVE COMMANDS ================================#
 
@@ -179,36 +200,37 @@ class RavenController:
                         0,
                         0
                         ]
-        for joint in leftJoints:
-            #print str(joint.GetValues())
-            print str(joint)
-        #leftJointValues = [value.GetValues()[0] for value in leftJoints]
-        print "JOINTVALUES: "+str(leftJoints)
+        if DEBUG:
+            for joint in leftJoints:
+                #print str(joint.GetValues())
+                print str(joint)
+            #leftJointValues = [value.GetValues()[0] for value in leftJoints]
+            print "JOINTVALUES: "+str(leftJoints)
         self.prevPose = fwdArmKin(0, leftJoints)[0] #FIXME: look at this
-        print "PREV POSEEEEEEEEE"
-        print self.prevPose
+        if DEBUG:
+            print "PREV POSEEEEEEEEE"
+            print self.prevPose
         env.SetViewer('qtcoin')
         #x = input()
         
 
-    def publishORCommand(self, joints):
+    def publishORCommand(self, joints, joints_array_indices):
         #set joint values
-        print "JOINTS=============================="
-        print joints
+        if DEBUG:
+            print "JOINTS=============================="
+            print joints
         if joints != None:
-            joints_array_indices = [2,3,4,5,6,8,10,7,9]
-            #self.robot.SetJointValues(joints.items(), JOINTS_ARRAY_INDICES)
             self.robot.SetJointValues(joints, joints_array_indices)
-            x = input()
         else:
             print "5. NO JOINTS RECEIVED"
         x = input()
         IPython.embed()
 
     def getORCommand(self, p, c):
-        print "1. FRAMES============================="
-        print p
-        print c
+        if DEBUG:
+            print "1. FRAMES============================="
+            print p
+            print c
         prevPose = self.prevPose
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
         if type(p) != type(None) and type(c) != type(None):
@@ -220,12 +242,14 @@ class RavenController:
                             translation[2]*self.scale)
             else:
                 dx, dy, dz = (0,0,0)
-            print "2. Command Translation: "+str(dx)+", "+str(dy)+", "+str(dz)
+            if DEBUG:
+                print "2. Command Translation: "+str(dx)+", "+str(dy)+", "+str(dz)
         else:
             dx, dy, dz = (0,0,0)
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz)
-        print "3. PREVIOUS JOINTS =========================================="
-        print self.prevPose
+        if DEBUG:
+            print "3. PREVIOUS POSE + JOINTS =========================================="
+            print self.prevPose
         prevjoints = invArmKin(0, self.prevPose, 0, False)
         self.currPose = prevPose
         self.currPose.translation=(curr_x,curr_y,curr_z)
@@ -233,11 +257,16 @@ class RavenController:
         #print "3. checking equality of current and prev poses"
         #print self.currPose==self.prevPose
         
-        print prevjoints
-        print "4. CURRENT POSE============================================"
-        result_joints = invArmKin(0,self.currPose,0)
-        #x = input()
-        return result_joints
+        if DEBUG:
+            print prevjoints
+            print "4. CURRENT POSE============================================"
+        result_joints_dict = invArmKin(0,self.currPose,0)
+        joints = []
+        joints_array_indices = []
+        for key in sorted(result_joints_dict.keys()):
+            joints.append(result_joints_dict[key])
+            joints_array_indices.append(ROS_TO_L_OR[key])
+        return joints, joints_array_indices 
     
 
     #========================== ROBOT/ROS COMMANDS =================================#
