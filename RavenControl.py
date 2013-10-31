@@ -9,7 +9,7 @@
 import Leap, sys
 from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 
-MODES = ["AUTONOMOUS", "PAUSE", "MASTER-SLAVE"]
+MODES = ["PAUSE", "MASTER-SLAVE", "AUTONOMOUS"]
 MODE_INDEX = 1
 
 def changeMode(direction):
