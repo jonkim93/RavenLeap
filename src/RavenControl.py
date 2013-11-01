@@ -46,6 +46,7 @@ ARM = "ONE_ARM" # or "TWO_ARM"
 MODEL_NAME = "myRaven.xml" 
 DEBUG = True
 
+SCALE=0.0003
 SHOULDER   =0
 ELBOW      =1
 Z_INS      =2
@@ -146,11 +147,12 @@ class Listener(Leap.Listener):
         self.prevFrame = self.currFrame
         self.currFrame = frame 
         self.rc.run(self.prevFrame, self.currFrame)
+        #x = raw_input()
 
     
 #========================= RAVEN CONTROLLER CLASS ==========================================================#
 class RavenController:
-    def __init__(self, scale=0.1, frame=None, relative_orientation=False, camera_frame=False):
+    def __init__(self, scale=SCALE, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
         self.scale = scale
         self.scale_increment = scale/20
@@ -168,30 +170,21 @@ class RavenController:
     #========================== OPEN RAVE COMMANDS ================================#
 
     def configureOREnv(self):
+        """ This function is called once at the begin to set up the openrave environment with the robot """
         env = rave.Environment()
         env.Load('myRaven.xml')
         self.robot = env.GetRobots()[0]
         self.manipulators = self.robot.GetManipulators()
         manip = self.manipulators[0]
         manipIndices = manip.GetArmIndices()
-
         allJoints = self.robot.GetJoints()  
         JointValues = [joint.GetValues()[0] for joint in allJoints]
 
-        """leftJoints = [allJoints[2].GetValues()[0], #shoulder_L
-                      allJoints[3].GetValues()[0], #elbow_L
-                      allJoints[4].GetValues()[0], #insertion_L
-                      allJoints[1].GetValues()[0], #filler--NOT NECESSARY AND SHOULD BE REMOVED
-                      allJoints[5].GetValues()[0], #tool_roll_L
-                      allJoints[6].GetValues()[0], #wrist_joint_L
-                      allJoints[8].GetValues()[0], #grapser_joint_1_L
-                      allJoints[10].GetValues()[0],#grasper_joint_2_L
-                      allJoints[7].GetValues()[0], #grasper_yaw_L
-                      allJoints[9].GetValues()[0]  #grasper1_tip_L #FIXME: WILL NEED TO CORREC THIS
-                      ] """
+        #These are the starting joints for the left arm; they are halfway between each limit
         leftJoints = [  (SHOULDER_MAX_LIMIT+SHOULDER_MIN_LIMIT)/2.0,
                         (ELBOW_MAX_LIMIT+ELBOW_MIN_LIMIT)/2.0,    
-                        (Z_INS_MAX_LIMIT+Z_INS_MIN_LIMIT)/2.0,
+                        #(Z_INS_MAX_LIMIT+Z_INS_MIN_LIMIT)/2.0,
+                        -0.1,
                         0,
                         (TOOL_ROLL_MAX_LIMIT+TOOL_ROLL_MIN_LIMIT)/2.0,
                         (TOOL_WRIST_MAX_LIMIT+TOOL_WRIST_MIN_LIMIT)/2.0,
@@ -200,74 +193,71 @@ class RavenController:
                         0,
                         0
                         ]
-        if DEBUG:
-            for joint in leftJoints:
-                #print str(joint.GetValues())
-                print str(joint)
-            #leftJointValues = [value.GetValues()[0] for value in leftJoints]
-            print "JOINTVALUES: "+str(leftJoints)
+        self.prevLeftJoints = leftJoints
+        self.prevRightJoints = None 
         self.prevPose = fwdArmKin(0, leftJoints)[0] #FIXME: look at this
-        if DEBUG:
-            print "PREV POSEEEEEEEEE"
-            print self.prevPose
         env.SetViewer('qtcoin')
-        #x = input()
-        
 
     def publishORCommand(self, joints, joints_array_indices):
-        #set joint values
-        if DEBUG:
-            print "JOINTS=============================="
-            print joints
-        if joints != None:
+        """ Publish a command to the robot; sets joints directly"""
+        if joints != None and joints_array_indices != None:
             self.robot.SetJointValues(joints, joints_array_indices)
-        else:
-            print "5. NO JOINTS RECEIVED"
-        x = input()
-        IPython.embed()
 
     def getORCommand(self, p, c):
-        if DEBUG:
-            print "1. FRAMES============================="
-            print p
-            print c
+        """ Calculates joints based off of input from the leap motion """
+        joints, joints_array_indices = self.calculateNewPose(p,c)
+        return joints, joints_array_indices
+
+
+    #====================== OPEN RAVE HELPER FUNCTIONS =============================#
+    def calculateNewPose(self, prev_frame, curr_frame):
         prevPose = self.prevPose
+        #print "PREVPOSE1:\n"+str(self.prevPose)
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
-        if type(p) != type(None) and type(c) != type(None):
-            translation, rotation = calculateTransform(p, c, 0)
-            #BASED OFF THIS TRANSLATION, WE NEED TO DIRECTLY CHANGE THE POSE SOMEHOW. HOWWW???
+        if type(prev_frame) != type(None) and type(curr_frame) != type(None):
+            translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None):
-                dx, dy, dz = (translation[0]*self.scale, 
-                            translation[1]*self.scale, 
-                            translation[2]*self.scale)
+                dx, dy, dz = (translation[0]*self.scale, translation[1]*self.scale, translation[2]*self.scale)
             else:
                 dx, dy, dz = (0,0,0)
-            if DEBUG:
-                print "2. Command Translation: "+str(dx)+", "+str(dy)+", "+str(dz)
         else:
             dx, dy, dz = (0,0,0)
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz)
-        if DEBUG:
-            print "3. PREVIOUS POSE + JOINTS =========================================="
-            print self.prevPose
-        prevjoints = invArmKin(0, self.prevPose, 0, False)
-        self.currPose = prevPose
-        self.currPose.translation=(curr_x,curr_y,curr_z)
-        self.prevPose = self.currPose
-        #print "3. checking equality of current and prev poses"
-        #print self.currPose==self.prevPose
+        try:
+            prevjoints = invArmKin(0, self.prevPose, 0, False)
+            currPose = tfx.pose(prevPose).copy()
+            currPose.translation=(curr_x,curr_y,curr_z)
+            #print "CURRPOSE1:\n"+str(currPose)
+            #print "PREVPOSE2:\n"+str(self.prevPose)
+
+            invkin_pass, joints, array_indices = self.calculateJoints(currPose)
+            if invkin_pass:
+                self.prevPose = currPose
+                #print "PREVPOSE3:\n"+str(self.prevPose)
+            return joints, array_indices
+        except ValueError as v:
+            return None, None
         
-        if DEBUG:
-            print prevjoints
-            print "4. CURRENT POSE============================================"
-        result_joints_dict = invArmKin(0,self.currPose,0)
-        joints = []
-        joints_array_indices = []
-        for key in sorted(result_joints_dict.keys()):
-            joints.append(result_joints_dict[key])
-            joints_array_indices.append(ROS_TO_L_OR[key])
-        return joints, joints_array_indices 
-    
+
+
+    def calculateJoints(self, pose):
+        result_joints_dict = invArmKin(0,pose,0)
+        if result_joints_dict != None:
+            joints = []
+            joints_array_indices = []
+            self.prevLeftJoints = []
+            self.prevLeftJointsArrayIndices = []
+            for key in sorted(result_joints_dict.keys()):
+                joints.append(result_joints_dict[key])
+                self.prevLeftJoints.append(result_joints_dict[key])
+                joints_array_indices.append(ROS_TO_L_OR[key])
+                self.prevLeftJointsArrayIndices.append(ROS_TO_L_OR[key])
+            #print "INVERSE KINEMATICS DIDN'T FAIL"
+            return True, joints, joints_array_indices 
+        else:
+            #print "INVERSE KINEMATICS FAILED"
+            return False, self.prevLeftJoints, self.prevLeftJointsArrayIndices
+        
 
     #========================== ROBOT/ROS COMMANDS =================================#
 
@@ -364,7 +354,7 @@ def calculateTransform(prev, curr, index):
         rot_matrix  = currHand.rotation_matrix(prev) # this is a Leap.Matrix!!
         return translation, rot_matrix    
     else:
-        print "CURRHAND IS NONE"
+        #print "CURRHAND IS NONE"
         return None, None
 
 #================= MAIN ================#
