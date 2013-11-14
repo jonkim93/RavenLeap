@@ -31,7 +31,7 @@ import tfx
 #====== OPENRAVE =========#
 import openravepy as rave
 
-
+"""
 
 BASE_FRAME = '/0_link'
 END_EFFECTOR_FRAME_PREFIX = '/tool_'
@@ -40,13 +40,17 @@ SIDE_ACTIVE = [True,False]
 SIDE_NAMES = ['L','R']
 SIDE_NAMES_FRIENDLY = ['left','right']
 
+"""
+
 #========================= CONSTANTS ============================#
 MODE = "SIM" # or "REAL"
 ARM = "ONE_ARM" # or "TWO_ARM"
 MODEL_NAME = "myRaven.xml" 
 DEBUG = True
 
-SCALE=0.0003
+X_SCALE=0.0003
+Y_SCALE=0.0003
+Z_SCALE=0.0006
 SHOULDER   =0
 ELBOW      =1
 Z_INS      =2
@@ -144,28 +148,52 @@ class Listener(Leap.Listener):
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
+        active = self.check_active(frame)
+        self.rc.updateActive(active)
         self.prevFrame = self.currFrame
         self.currFrame = frame 
         self.rc.run(self.prevFrame, self.currFrame)
         #x = raw_input()
 
+    def check_active(self, frame):
+        if not frame.hands.empty:
+            # Get the first hand
+            hand = frame.hands[0]
+            # Check if the hand has any fingers
+            fingers = hand.fingers
+            if len(fingers) <= 1:
+                return False
+            else:
+                return True
+        return False
     
 #========================= RAVEN CONTROLLER CLASS ==========================================================#
 class RavenController:
-    def __init__(self, scale=SCALE, frame=None, relative_orientation=False, camera_frame=False):
+    def __init__(self, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
-        self.scale = scale
-        self.scale_increment = scale/20
+        self.x_scale = x_scale
+        self.y_scale = y_scale
+        self.z_scale = z_scale 
+        self.active = False
         if MODE=="SIM":
             self.configureOREnv()  
 
+    def updateActive(self, a):
+        if self.active != a:
+            if a==False:
+                print "Controller inactive"
+            else:
+                print "Controller active"
+        self.active = a 
+
     def run(self, p, c):
-        if MODE == "REAL":
-            raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
-            self.raven_pub.publish(raven_command)
-        elif MODE == "SIM":
-            joints, joints_array_indices = self.getORCommand(p, c)
-            self.publishORCommand(joints, joints_array_indices)  
+        if self.active:
+            if MODE == "REAL":
+                raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
+                self.raven_pub.publish(raven_command)
+            elif MODE == "SIM":
+                joints, joints_array_indices = self.getORCommand(p, c)
+                self.publishORCommand(joints, joints_array_indices)  
 
     #========================== OPEN RAVE COMMANDS ================================#
 
@@ -217,7 +245,7 @@ class RavenController:
         if type(prev_frame) != type(None) and type(curr_frame) != type(None):
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None):
-                dx, dy, dz = (translation[0]*self.scale, translation[1]*self.scale, translation[2]*self.scale)
+                dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)
             else:
                 dx, dy, dz = (0,0,0)
         else:
