@@ -148,12 +148,29 @@ class Listener(Leap.Listener):
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
+
         active = self.check_active(frame)
+        grip = self.check_grip(frame)
+
         self.rc.updateActive(active)
+        
         self.prevFrame = self.currFrame
         self.currFrame = frame 
-        self.rc.run(self.prevFrame, self.currFrame)
+        
+        self.rc.run(self.prevFrame, self.currFrame, grip)
         #x = raw_input()
+
+    def check_grip(self, frame):
+        if not frame.hands.empty:
+            # Get the first hand
+            hand = frame.hands[0]
+            # Check if the hand has any fingers
+            fingers = hand.fingers
+            if len(fingers) == 1:
+                return True
+            else:
+                return False
+        return False
 
     def check_active(self, frame):
         if not frame.hands.empty:
@@ -161,10 +178,14 @@ class Listener(Leap.Listener):
             hand = frame.hands[0]
             # Check if the hand has any fingers
             fingers = hand.fingers
-            if len(fingers) <= 1:
+            if len(fingers) <= 2:
+                return True
+            else:
+                return False
+            """if len(fingers) <= 1:
                 return False
             else:
-                return True
+                return True"""
         return False
     
 #========================= RAVEN CONTROLLER CLASS ==========================================================#
@@ -186,13 +207,13 @@ class RavenController:
                 print "Controller active"
         self.active = a 
 
-    def run(self, p, c):
+    def run(self, p, c, grip):
         if self.active:
             if MODE == "REAL":
                 raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
                 self.raven_pub.publish(raven_command)
             elif MODE == "SIM":
-                joints, joints_array_indices = self.getORCommand(p, c)
+                joints, joints_array_indices = self.getORCommand(p, c, grip)
                 self.publishORCommand(joints, joints_array_indices)  
 
     #========================== OPEN RAVE COMMANDS ================================#
@@ -231,14 +252,14 @@ class RavenController:
         if joints != None and joints_array_indices != None:
             self.robot.SetJointValues(joints, joints_array_indices)
 
-    def getORCommand(self, p, c):
+    def getORCommand(self, p, c, grip):
         """ Calculates joints based off of input from the leap motion """
-        joints, joints_array_indices = self.calculateNewPose(p,c)
+        joints, joints_array_indices = self.calculateNewPose(p,c,grip)
         return joints, joints_array_indices
 
 
     #====================== OPEN RAVE HELPER FUNCTIONS =============================#
-    def calculateNewPose(self, prev_frame, curr_frame):
+    def calculateNewPose(self, prev_frame, curr_frame, grip):
         prevPose = self.prevPose
         #print "PREVPOSE1:\n"+str(self.prevPose)
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
@@ -258,7 +279,7 @@ class RavenController:
             #print "CURRPOSE1:\n"+str(currPose)
             #print "PREVPOSE2:\n"+str(self.prevPose)
 
-            invkin_pass, joints, array_indices = self.calculateJoints(currPose)
+            invkin_pass, joints, array_indices = self.calculateJoints(currPose, grip)
             if invkin_pass:
                 self.prevPose = currPose
                 #print "PREVPOSE3:\n"+str(self.prevPose)
@@ -268,7 +289,7 @@ class RavenController:
         
 
 
-    def calculateJoints(self, pose):
+    def calculateJoints(self, pose, grip):
         result_joints_dict = invArmKin(0,pose,0)
         if result_joints_dict != None:
             joints = []
