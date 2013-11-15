@@ -11,6 +11,7 @@ from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 
 #====== GENERAL ==========#
 import math
+import numpy as np 
 from numpy import *
 from numpy.linalg import *
 from optparse import OptionParser
@@ -261,28 +262,31 @@ class RavenController:
     #====================== OPEN RAVE HELPER FUNCTIONS =============================#
     def calculateNewPose(self, prev_frame, curr_frame, grip):
         prevPose = self.prevPose
-        #print "PREVPOSE1:\n"+str(self.prevPose)
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
+        prevOrientation = prevPose.orientation
         if type(prev_frame) != type(None) and type(curr_frame) != type(None):
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None):
-                dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)
+                dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)         
+                x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
+                delta_rotation = np.matrix([x_basis, y_basis, z_basis])
+                currOrientation = prevOrientation*delta_rotation
+                print currOrientation
             else:
                 dx, dy, dz = (0,0,0)
+                currOrientation = prevOrientation
         else:
             dx, dy, dz = (0,0,0)
+            currOrientation = prevOrientation
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz)
         try:
             prevjoints = invArmKin(0, self.prevPose, 0, False)
             currPose = tfx.pose(prevPose).copy()
             currPose.translation=(curr_x,curr_y,curr_z)
-            #print "CURRPOSE1:\n"+str(currPose)
-            #print "PREVPOSE2:\n"+str(self.prevPose)
-
+            currPose.orientation = currOrientation
             invkin_pass, joints, array_indices = self.calculateJoints(currPose, grip)
             if invkin_pass:
                 self.prevPose = currPose
-                #print "PREVPOSE3:\n"+str(self.prevPose)
             return joints, array_indices
         except ValueError as v:
             return None, None
