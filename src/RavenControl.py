@@ -221,9 +221,9 @@ class RavenController:
 
     def configureOREnv(self):
         """ This function is called once at the begin to set up the openrave environment with the robot """
-        env = rave.Environment()
-        env.Load('myRaven.xml')
-        self.robot = env.GetRobots()[0]
+        self.env = rave.Environment()
+        self.env.Load('myRaven.xml')
+        self.robot = self.env.GetRobots()[0]
         self.manipulators = self.robot.GetManipulators()
         manip = self.manipulators[0]
         manipIndices = manip.GetArmIndices()
@@ -246,7 +246,7 @@ class RavenController:
         self.prevLeftJoints = leftJoints
         self.prevRightJoints = None 
         self.prevPose = fwdArmKin(0, leftJoints)[0] #FIXME: look at this
-        env.SetViewer('qtcoin')
+        self.env.SetViewer('qtcoin')
 
     def publishORCommand(self, joints, joints_array_indices):
         """ Publish a command to the robot; sets joints directly"""
@@ -261,16 +261,20 @@ class RavenController:
 
     #====================== OPEN RAVE HELPER FUNCTIONS =============================#
     def calculateNewPose(self, prev_frame, curr_frame, grip):
+        #ROTATION = tfx.pose([0,0,0],[0,180,90]).matrix 
         prevPose = self.prevPose
+        #prevPose = ROTATION*prevPose 
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
         prevOrientation = prevPose.orientation
         if type(prev_frame) != type(None) and type(curr_frame) != type(None):
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None):
-                dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)         
+                #dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)         
+                dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.z_scale, translation[1]*self.y_scale)
                 x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
                 delta_rotation = np.matrix([x_basis, y_basis, z_basis])
-                currOrientation = prevOrientation*delta_rotation
+                #currOrientation = prevOrientation*delta_rotation
+                currOrientation = tfx.tb_angles(-90,90,0)
                 print currOrientation
             else:
                 dx, dy, dz = (0,0,0)
@@ -281,10 +285,18 @@ class RavenController:
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz)
         try:
             prevjoints = invArmKin(0, self.prevPose, 0, False)
+            #print "PREV POSE"
+            #print self.prevPose
             currPose = tfx.pose(prevPose).copy()
             currPose.translation=(curr_x,curr_y,curr_z)
             currPose.orientation = currOrientation
+            #rotatedPose = tfx.pose(prevPose).copy()
+            #rotatedPose = ROTATION*rotatedPose
+            #IPython.embed()
+            #zero_link = plot_transform(self.env, self.robot.GetLink('0_link').GetTransform())
+            #lines = plot_transform(self.env, np.array(currPose.matrix))
             invkin_pass, joints, array_indices = self.calculateJoints(currPose, grip)
+            #invkin_pass, joints, array_indices = self.calculateJoints(rotatedPose, grip)
             if invkin_pass:
                 self.prevPose = currPose
             return joints, array_indices
@@ -409,6 +421,21 @@ def calculateTransform(prev, curr, index):
     else:
         #print "CURRHAND IS NONE"
         return None, None
+
+def plot_transform(env, T, s=0.1):
+    """
+    Plots transform T in openrave environment.
+    S is the length of the axis markers.
+    """
+    h = []
+    x = T[0:3,0]
+    y = T[0:3,1]
+    z = T[0:3,2]
+    o = T[0:3,3]
+    h.append(env.drawlinestrip(points=np.array([o, o+s*x]), linewidth=3.0, colors=np.array([(1,0,0),(1,0,0)])))
+    h.append(env.drawlinestrip(points=np.array([o, o+s*y]), linewidth=3.0, colors=np.array(((0,1,0),(0,1,0)))))
+    h.append(env.drawlinestrip(points=np.array([o, o+s*z]), linewidth=3.0, colors=np.array(((0,0,1),(0,0,1)))))
+    return h
 
 #================= MAIN ================#
 def main():
