@@ -62,6 +62,8 @@ GRASP2     =7
 YAW        =8
 GRASP      =9
 
+ACTIVE_THRESHOLD = 5
+
 JOINTS_ARRAY_INDICES = [SHOULDER, ELBOW, Z_INS, TOOL_ROT, WRIST, GRASP1, GRASP2, YAW, GRASP]
 ROS_TO_L_OR = {0:2,
                1:3,
@@ -113,6 +115,7 @@ TOOL_GRASP2_MAX_LIMIT =   TOOL_GRASP_LIMIT
 class Listener(Leap.Listener):
     def on_init(self, controller):
         print "Initialized"
+        self.prevActiveFrameCounter = 0
         self.prevFrame = None
         self.currFrame = None
         self.rc = RavenController()
@@ -175,18 +178,19 @@ class Listener(Leap.Listener):
 
     def check_active(self, frame):
         if not frame.hands.empty:
-            # Get the first hand
             hand = frame.hands[0]
-            # Check if the hand has any fingers
             fingers = hand.fingers
+            #print "ACTIVE FRAME COUNTER"
+            #print self.prevActiveFrameCounter
             if len(fingers) <= 2:
-                return True
+                self.prevActiveFrameCounter += 1
+                if self.prevActiveFrameCounter > ACTIVE_THRESHOLD:
+                    return True
+                else:
+                    return False
             else:
+                self.prevActiveFrameCounter = 0
                 return False
-            """if len(fingers) <= 1:
-                return False
-            else:
-                return True"""
         return False
     
 #========================= RAVEN CONTROLLER CLASS ==========================================================#
@@ -312,6 +316,13 @@ class RavenController:
             joints_array_indices = []
             self.prevLeftJoints = []
             self.prevLeftJointsArrayIndices = []
+            print "GRASP JOINTS???"
+            if not grip:
+                result_joints_dict[6] = 0.78
+                result_joints_dict[7] = 0.78
+            else:
+                result_joints_dict[6] = 0
+                result_joints_dict[7] = 0
             for key in sorted(result_joints_dict.keys()):
                 joints.append(result_joints_dict[key])
                 self.prevLeftJoints.append(result_joints_dict[key])
