@@ -315,7 +315,7 @@ class RavenController:
 
             #============== END EXPERIMENTAL STUFF ================#
             if invkin_pass:
-                self.prevPose = currPose
+                self.prevPose = newPose
             return resultJoints, array_indices
         except ValueError as v:
             return None, None
@@ -434,7 +434,6 @@ def calculateDeltaCommand(translation, x_scale, y_scale, z_scale):
 
 def scaleDeltaCommand(command, weights=INTERPOLATION_WEIGHTS):
     return [delta*weight for delta,weight in command,weights]
-
 
 def calculateTransform(prev, curr, index):
     """
