@@ -111,6 +111,8 @@ TOOL_GRASP1_MAX_LIMIT =   TOOL_GRASP_LIMIT
 TOOL_GRASP2_MIN_LIMIT = (-TOOL_GRASP_LIMIT)
 TOOL_GRASP2_MAX_LIMIT =   TOOL_GRASP_LIMIT
 
+INTERPOLATION_WEIGHTS = (0.5,0.5,0.5)
+
 #========================= LEAP MOTION LISTENER CLASS ======================================================#
 class Listener(Leap.Listener):
     def on_init(self, controller):
@@ -274,7 +276,8 @@ class RavenController:
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None):
                 #dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)         
-                dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.z_scale, translation[1]*self.y_scale)
+                dx, dy, dz = scaleDeltaCommand(calculateDeltaCommand(translation))  #FIXME: THIS MAY NOT WORK
+
                 x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
                 delta_rotation = np.matrix([x_basis, y_basis, z_basis])
                 #currOrientation = prevOrientation*delta_rotation
@@ -406,6 +409,14 @@ class RavenController:
             return
 
 #========== HELPER FUNCTIONS ==========#
+
+def calculateDeltaCommand(translation):
+    return (translation[0]*self.x_scale, translation[2]*self.z_scale, translation[1]*self.y_scale)
+
+def scaleDeltaCommand(command, weights=INTERPOLATION_WEIGHTS):
+    return (delta*weight for delta,weight in command,weights)
+
+
 def calculateTransform(prev, curr, index):
     """
     Static helper method for calculating the transform between two leapmotion frames 
