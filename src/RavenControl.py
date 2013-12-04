@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-#TODO: make dictionary mapping from OR joints to ROS joints and vice versa
-#TODO: check joint limits
-#TODO: check raven_2/raven_2_trajectory/raven_planner.py
-#TODO: something wrong with the pose calculation from joint angles . .. 
+# NOTES:
+# for translation, we are currently SCALING and INTERPOLATING the commands. is there a difference between scaling/interpolating? slight difference
+
+# TODO: in calculateNewPose, use a try/catch rather than if/else-->catch the null type errors??
 
 #====== LEAP =============#
 import Leap, sys
@@ -31,17 +31,6 @@ import tfx
 
 #====== OPENRAVE =========#
 import openravepy as rave
-
-"""
-
-BASE_FRAME = '/0_link'
-END_EFFECTOR_FRAME_PREFIX = '/tool_'
-END_EFFECTOR_FRAME_SUFFIX = ['L','R']
-SIDE_ACTIVE = [True,False]
-SIDE_NAMES = ['L','R']
-SIDE_NAMES_FRIENDLY = ['left','right']
-
-"""
 
 #========================= CONSTANTS ============================#
 MODE = "SIM" # or "REAL"
@@ -112,6 +101,7 @@ TOOL_GRASP2_MIN_LIMIT = (-TOOL_GRASP_LIMIT)
 TOOL_GRASP2_MAX_LIMIT =   TOOL_GRASP_LIMIT
 
 INTERPOLATION_WEIGHTS = (0.5,0.5,0.5)
+JOINT_WEIGHTS = (1,1,1,1,1,1,1,1,1)
 
 #========================= LEAP MOTION LISTENER CLASS ======================================================#
 class Listener(Leap.Listener):
@@ -124,7 +114,6 @@ class Listener(Leap.Listener):
 
     def on_connect(self, controller):
         print "Connected"
-
         # Enable gestures
         controller.enable_gesture(Leap.Gesture.TYPE_CIRCLE);
         controller.enable_gesture(Leap.Gesture.TYPE_KEY_TAP);
@@ -266,47 +255,48 @@ class RavenController:
 
 
     #====================== OPEN RAVE HELPER FUNCTIONS =============================#
-    def calculateNewPose(self, prev_frame, curr_frame, grip):
+    def calculateNewPose(self, prev_frame, curr_frame, grip):  #TODO: would like to streamline this
         #ROTATION = tfx.pose([0,0,0],[0,180,90]).matrix 
         prevPose = self.prevPose
         #prevPose = ROTATION*prevPose 
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
         prevOrientation = prevPose.orientation
-        if type(prev_frame) != type(None) and type(curr_frame) != type(None):
+        if type(prev_frame) != type(None) and type(curr_frame) != type(None): #if we actually have frames
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
-            if type(translation) != type(None) and type(rotation) != type(None):
+            if type(translation) != type(None) and type(rotation) != type(None): # if we have a valid translation/rotation
                 #dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)         
-                dx, dy, dz = scaleDeltaCommand(calculateDeltaCommand(translation))  #FIXME: THIS MAY NOT WORK
+                dx, dy, dz = scaleDeltaCommand(calculateDeltaCommand(translation, self.x_scale, self.y_scale, self.z_scale))  #FIXME: THIS MAY NOT WORK
 
                 x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
                 delta_rotation = np.matrix([x_basis, y_basis, z_basis])
-                #currOrientation = prevOrientation*delta_rotation
                 currOrientation = tfx.tb_angles(-90,90,0)
                 print currOrientation
-            else:
+            else:  # DOC: if we don't have a valid translation/rotation, don't move
                 dx, dy, dz = (0,0,0)
                 currOrientation = prevOrientation
-        else:
+        else: # if we don't have frames, also don't move
             dx, dy, dz = (0,0,0)
             currOrientation = prevOrientation
-        curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz)
+
+        curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz) # ADD IN THE DELTA COMMAND
+
         try:
-            prevjoints = invArmKin(0, self.prevPose, 0, False)
-            #print "PREV POSE"
-            #print self.prevPose
+            prevJoints = invArmKin(0, self.prevPose, 0, False)
+
+            # set new pose values
             currPose = tfx.pose(prevPose).copy()
             currPose.translation=(curr_x,curr_y,curr_z)
             currPose.orientation = currOrientation
-            #rotatedPose = tfx.pose(prevPose).copy()
-            #rotatedPose = ROTATION*rotatedPose
-            #IPython.embed()
-            #zero_link = plot_transform(self.env, self.robot.GetLink('0_link').GetTransform())
-            #lines = plot_transform(self.env, np.array(currPose.matrix))
-            invkin_pass, joints, array_indices = self.calculateJoints(currPose, grip)
-            #invkin_pass, joints, array_indices = self.calculateJoints(rotatedPose, grip)
+
+            # calculate new joints
+            invkin_pass, nextJoints, array_indices = self.calculateJoints(currPose, grip)
+
+            # weight joints
+            #newJoints = scaleAndAddDeltaJoints(prevJoints,nextJoints)
+
             if invkin_pass:
                 self.prevPose = currPose
-            return joints, array_indices
+            return nextJoints, array_indices
         except ValueError as v:
             return None, None
         
@@ -410,11 +400,20 @@ class RavenController:
 
 #========== HELPER FUNCTIONS ==========#
 
-def calculateDeltaCommand(translation):
-    return (translation[0]*self.x_scale, translation[2]*self.z_scale, translation[1]*self.y_scale)
+def calculateDeltaJoints(prevJoints,nextJoints):
+    return [next-prev for prev,next in prevJoints,nextJoints]   ####### AM I USING THESE GENERATOR FUNCTIONS CORRECTLY??
+
+def scaleAndAddDeltaJoints(prevJoints,nextJoints,weights=JOINT_WEIGHTS):
+    deltaJoints = calculateDeltaJoints(prevJoints,nextJoints)
+    scaledDeltaJoints = [delta*weight for delta,weight in deltaJoints,weights]
+    newJoints = [prev+scaledDelta for prev,scaledDelta in prevJoints,scaledDeltaJoints]
+    return newJoints
+
+def calculateDeltaCommand(translation, x_scale, y_scale, z_scale):
+    return (translation[0]*x_scale, translation[2]*z_scale, translation[1]*y_scale)
 
 def scaleDeltaCommand(command, weights=INTERPOLATION_WEIGHTS):
-    return (delta*weight for delta,weight in command,weights)
+    return [delta*weight for delta,weight in command,weights]
 
 
 def calculateTransform(prev, curr, index):
