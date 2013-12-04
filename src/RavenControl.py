@@ -32,15 +32,25 @@ import tfx
 #====== OPENRAVE =========#
 import openravepy as rave
 
-#========================= CONSTANTS ============================#
+
+
+#========================= ARGUMENTS ============================#
 MODE = "SIM" # or "REAL"
 ARM = "ONE_ARM" # or "TWO_ARM"
-MODEL_NAME = "myRaven.xml" 
+
 DEBUG = True
+
+INTERPOLATION_WEIGHTS = (0.5,0.5,0.5)
+JOINT_WEIGHTS = (1,1,1,1,1,1,1,1,1)
 
 X_SCALE=0.0003
 Y_SCALE=0.0003
 Z_SCALE=0.0006
+
+
+#========================= CONSTANTS ============================#
+MODEL_NAME = "myRaven.xml" 
+
 SHOULDER   =0
 ELBOW      =1
 Z_INS      =2
@@ -100,8 +110,7 @@ TOOL_GRASP1_MAX_LIMIT =   TOOL_GRASP_LIMIT
 TOOL_GRASP2_MIN_LIMIT = (-TOOL_GRASP_LIMIT)
 TOOL_GRASP2_MAX_LIMIT =   TOOL_GRASP_LIMIT
 
-INTERPOLATION_WEIGHTS = (0.5,0.5,0.5)
-JOINT_WEIGHTS = (1,1,1,1,1,1,1,1,1)
+
 
 #========================= LEAP MOTION LISTENER CLASS ======================================================#
 class Listener(Leap.Listener):
@@ -291,12 +300,23 @@ class RavenController:
             # calculate new joints
             invkin_pass, nextJoints, array_indices = self.calculateJoints(currPose, grip)
 
-            # weight joints
-            #newJoints = scaleAndAddDeltaJoints(prevJoints,nextJoints)
 
+            #==============  THIS STUFF IS EXPERIMENTAL ===========#
+            # weight joints
+            newJoints = scaleAndAddDeltaJoints(prevJoints,nextJoints)
+            try:
+                print "JOINT WEIGHTS: "+JOINT_WEIGHTS
+                newPose = fwdArmKin(0, newJoints)[0]
+                resultJoints = newJoints
+            except Exception:
+                print "JOINT WEIGHTING FAILED"
+                newPose = currPose
+                resultJoints = nextJoints
+
+            #============== END EXPERIMENTAL STUFF ================#
             if invkin_pass:
                 self.prevPose = currPose
-            return nextJoints, array_indices
+            return resultJoints, array_indices
         except ValueError as v:
             return None, None
         
