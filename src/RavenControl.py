@@ -17,6 +17,7 @@ from numpy.linalg import *
 from optparse import OptionParser
 import threading
 import IPython
+import getch
 
 #====== ROS ==============#
 #import tf
@@ -166,8 +167,17 @@ class Listener(Leap.Listener):
         self.prevFrame = self.currFrame
         self.currFrame = frame 
         
-        self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
+        pedal_down = self.check_clutch()
+        if pedal_down:
+            self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
         #x = raw_input()
+
+    def check_clutch(self):
+        z = getch.getch()
+        if ord(z) == 32: #a space bar
+            return True
+        return False
+
 
     def check_grip(self, frame):
         if not frame.hands.empty:
