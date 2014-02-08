@@ -1,0 +1,44 @@
+<package>
+  <description brief="RavenLeap">
+
+     RavenLeap
+
+  </description>
+  <author>Jonathan Kim</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/raven_leap_master</url>
+
+  <depend package="rospy"/>
+  <depend package="roscpp"/>
+  <depend package="tf"/>
+  
+  <depend package="geometry_msgs"/>
+  <depend package="std_msgs"/>
+  <depend package="sensor_msgs"/>
+
+  <depend package="bullet"/>
+  
+  <depend package="raven_2_msgs"/>
+  <depend package="raven_2_trajectory"/>
+  <depend package="raven_2_control"/>
+  <depend package="raven_2_utils"/>
+  <depend package="tfx"/>
+  <depend package="tf_conversions"/>
+  <depend package="dynamic_reconfigure"/>
+  <depend package="rospy"/>
+
+  <depend package="smach"/>
+  <depend package="smach_ros"/>
+
+  <!--<depend package="raven_pose_estimator"/>-->
+
+  
+  <export>
+    <cpp cflags="-I${prefix}/include" lflags="-L${prefix}/lib"/>
+  </export>
+  
+</package>
+
+
+
