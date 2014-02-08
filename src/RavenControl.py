@@ -38,15 +38,20 @@ import openravepy as rave
 MODE = "SIM" # or "REAL"
 ARM = "ONE_ARM" # or "TWO_ARM"
 
+EXP = False 
+
 DEBUG = True
 
 INTERPOLATION_WEIGHTS = (0.5,0.5,0.5)
 JOINT_WEIGHTS = (1,1,1,1,1,1,1,1,1)
 
-X_SCALE=0.0003
-Y_SCALE=0.0003
-Z_SCALE=0.0006
+X_SCALE=0.00017
+Y_SCALE=0.00017
+Z_SCALE=0.00021
 
+DX_UPPER_BOUND = 0.003
+DY_UPPER_BOUND = 0.003
+DZ_UPPER_BOUND = 0.003
 
 #========================= CONSTANTS ============================#
 MODEL_NAME = "myRaven.xml" 
@@ -154,14 +159,14 @@ class Listener(Leap.Listener):
         frame = controller.frame()
 
         active = self.check_active(frame)
-        grip = self.check_grip(frame)
+        grip, tipDistance = self.check_grip(frame)
 
         self.rc.updateActive(active)
         
         self.prevFrame = self.currFrame
         self.currFrame = frame 
         
-        self.rc.run(self.prevFrame, self.currFrame, grip)
+        self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
         #x = raw_input()
 
     def check_grip(self, frame):
@@ -170,11 +175,18 @@ class Listener(Leap.Listener):
             hand = frame.hands[0]
             # Check if the hand has any fingers
             fingers = hand.fingers
-            if len(fingers) == 1:
-                return True
+
+            if len(fingers) == 2:
+                pos0 = fingers[0].tip_position
+                pos1 = fingers[1].tip_position
+                distanceBetweenTips = math.sqrt((pos0[0]-pos1[0])**2 + (pos0[1]-pos1[1])**2 + (pos0[2]-pos1[2])**2)
+                #print "distance between tips: ", distanceBetweenTips
+                return False, distanceBetweenTips
+            elif len(fingers) == 1:
+                return True, 0
             else:
-                return False
-        return False
+                return False, -10
+        return False, -10
 
     def check_active(self, frame):
         if not frame.hands.empty:
@@ -212,13 +224,13 @@ class RavenController:
                 print "Controller active"
         self.active = a 
 
-    def run(self, p, c, grip):
+    def run(self, p, c, grip, tipDistance):
         if self.active:
             if MODE == "REAL":
                 raven_command = self.getRavenCommand()  # start continually publishing raven commands based on input from the leapmotion
                 self.raven_pub.publish(raven_command)
             elif MODE == "SIM":
-                joints, joints_array_indices = self.getORCommand(p, c, grip)
+                joints, joints_array_indices = self.getORCommand(p, c, grip, tipDistance)
                 self.publishORCommand(joints, joints_array_indices)  
 
     #========================== OPEN RAVE COMMANDS ================================#
@@ -257,14 +269,14 @@ class RavenController:
         if joints != None and joints_array_indices != None:
             self.robot.SetJointValues(joints, joints_array_indices)
 
-    def getORCommand(self, p, c, grip):
+    def getORCommand(self, p, c, grip, tipDistance):
         """ Calculates joints based off of input from the leap motion """
-        joints, joints_array_indices = self.calculateNewPose(p,c,grip)
+        joints, joints_array_indices = self.calculateNewPose(p,c,grip, tipDistance)
         return joints, joints_array_indices
 
 
     #====================== OPEN RAVE HELPER FUNCTIONS =============================#
-    def calculateNewPose(self, prev_frame, curr_frame, grip):  #TODO: would like to streamline this
+    def calculateNewPose(self, prev_frame, curr_frame, grip, tipDistance):  #TODO: would like to streamline this
         #ROTATION = tfx.pose([0,0,0],[0,180,90]).matrix 
         prevPose = self.prevPose
         #prevPose = ROTATION*prevPose 
@@ -273,20 +285,24 @@ class RavenController:
         if type(prev_frame) != type(None) and type(curr_frame) != type(None): #if we actually have frames
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None): # if we have a valid translation/rotation
-                #dx, dy, dz = (translation[0]*self.x_scale, translation[1]*self.y_scale, translation[2]*self.z_scale)         
-                dx, dy, dz = scaleDeltaCommand(calculateDeltaCommand(translation, self.x_scale, self.y_scale, self.z_scale))  #FIXME: THIS MAY NOT WORK
+                dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.y_scale, translation[1]*self.z_scale)         
+                #dx, dy, dz = scaleDeltaCommand(calculateDeltaCommand(translation, self.x_scale, self.y_scale, self.z_scale))  #FIXME: THIS MAY NOT WORK
 
                 x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
                 delta_rotation = np.matrix([x_basis, y_basis, z_basis])
                 currOrientation = tfx.tb_angles(-90,90,0)
-                print currOrientation
+                #print currOrientation
+
+                if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND:
+                    (dx, dy, dz) = (0,0,0)
+                    currOrientation = prevOrientation
             else:  # DOC: if we don't have a valid translation/rotation, don't move
                 dx, dy, dz = (0,0,0)
                 currOrientation = prevOrientation
         else: # if we don't have frames, also don't move
             dx, dy, dz = (0,0,0)
             currOrientation = prevOrientation
-
+        #print "dx, dy, dz = "+str(dx)+", "+str(dy)+", "+str(dz)
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz) # ADD IN THE DELTA COMMAND
 
         try:
@@ -298,47 +314,66 @@ class RavenController:
             currPose.orientation = currOrientation
 
             # calculate new joints
-            invkin_pass, nextJoints, array_indices = self.calculateJoints(currPose, grip)
+            invkin_pass, nextJoints, array_indices = self.calculateJoints(currPose, grip, tipDistance)
 
 
             #==============  THIS STUFF IS EXPERIMENTAL ===========#
             # weight joints
-            newJoints = scaleAndAddDeltaJoints(prevJoints,nextJoints)
-            try:
-                print "JOINT WEIGHTS: "+JOINT_WEIGHTS
-                newPose = fwdArmKin(0, newJoints)[0]
-                resultJoints = newJoints
-            except Exception:
-                print "JOINT WEIGHTING FAILED"
-                newPose = currPose
+            if EXP:
+                newJoints = scaleAndAddDeltaJoints(prevJoints,nextJoints)
+                print "HERE"
+                try:
+                    print "JOINT WEIGHTS: "+JOINT_WEIGHTS
+                    newPose = fwdArmKin(0, newJoints)[0]
+                    resultJoints = newJoints
+                except Exception:
+                    print "JOINT WEIGHTING FAILED"
+                    newPose = currPose
+                    resultJoints = nextJoints   #============== END EXPERIMENTAL STUFF ================#
+            else:
                 resultJoints = nextJoints
-
-            #============== END EXPERIMENTAL STUFF ================#
+                newPose = currPose             
             if invkin_pass:
                 self.prevPose = newPose
             return resultJoints, array_indices
         except ValueError as v:
+            print "VALUE ERROR"
             return None, None
         
 
 
-    def calculateJoints(self, pose, grip):
+    def calculateJoints(self, pose, grip, tipDistance):
         result_joints_dict = invArmKin(0,pose,0)
         if result_joints_dict != None:
-            joints = []
+            prevLeftJointsCopy = self.prevLeftJoints
+            if EXP:
+                joints = {}
+                self.prevLeftJoints = {}
+            else:
+                joints = []
+                self.prevLeftJoints = []
             joints_array_indices = []
-            self.prevLeftJoints = []
             self.prevLeftJointsArrayIndices = []
-            print "GRASP JOINTS???"
-            if not grip:
-                result_joints_dict[6] = 0.78
-                result_joints_dict[7] = 0.78
+            #print "GRASP JOINTS???"
+
+            #    SET GRIP HERE
+            if not grip and tipDistance>=40:
+                result_joints_dict[6] = 0.78*((tipDistance-40.0)/90.0)  #INTERPOLATE TIP DISTANCE HERE
+                result_joints_dict[7] = 0.78*((tipDistance-40.0)/90.0)
+            elif not grip and tipDistance < 40:
+                result_joints_dict[6] = prevLeftJointsCopy[5] 
+                result_joints_dict[7] = prevLeftJointsCopy[6]
             else:
                 result_joints_dict[6] = 0
                 result_joints_dict[7] = 0
+
             for key in sorted(result_joints_dict.keys()):
-                joints.append(result_joints_dict[key])
-                self.prevLeftJoints.append(result_joints_dict[key])
+                if EXP:
+                    joints[ROS_TO_L_OR[key]] = result_joints_dict[key]
+                    self.prevLeftJoints[ROS_TO_L_OR[key]] = result_joints_dict[key]
+                else:
+                    joints.append(result_joints_dict[key]) #  MAY NEED TO BRING THIS BACK
+                    self.prevLeftJoints.append(result_joints_dict[key])
                 joints_array_indices.append(ROS_TO_L_OR[key])
                 self.prevLeftJointsArrayIndices.append(ROS_TO_L_OR[key])
             #print "INVERSE KINEMATICS DIDN'T FAIL"
@@ -391,7 +426,7 @@ class RavenController:
                     print "no transform for right!"
                 return
             xx, yy, zz, ww = (1, 0, 0, 0)  #FIXME: identity quaternion for now; will replace once we start focusing on 
-            print "dx: "+dx+"  dy: "+dy+"  dz: "+dz+"\n"
+            #print "dx: "+dx+"  dy: "+dy+"  dz: "+dz+"\n"
 
             #FIXME: this stuff is probably wrong
             dx, dy, dz = (translation.x*self.scale, 
@@ -421,19 +456,29 @@ class RavenController:
 #========== HELPER FUNCTIONS ==========#
 
 def calculateDeltaJoints(prevJoints,nextJoints):
-    return [next-prev for prev,next in prevJoints,nextJoints]   ####### AM I USING THESE GENERATOR FUNCTIONS CORRECTLY??
+    deltaJoints = []
+    #print str(prevJoints.keys())
+    #print str(nextJoints.keys())
+    for key in sorted(nextJoints.keys()):
+        deltaJoints.append(nextJoints[key]-prevJoints[L_OR_TO_ROS[key]])
+    return deltaJoints 
 
 def scaleAndAddDeltaJoints(prevJoints,nextJoints,weights=JOINT_WEIGHTS):
     deltaJoints = calculateDeltaJoints(prevJoints,nextJoints)
     scaledDeltaJoints = [delta*weight for delta,weight in deltaJoints,weights]
-    newJoints = [prev+scaledDelta for prev,scaledDelta in prevJoints,scaledDeltaJoints]
+    newJoints = []
+    for i in range(0,len(prevJoints)):
+        newJoints.append(prevJoints[i]+scaledDeltaJoints[i])
     return newJoints
 
 def calculateDeltaCommand(translation, x_scale, y_scale, z_scale):
     return (translation[0]*x_scale, translation[2]*z_scale, translation[1]*y_scale)
 
 def scaleDeltaCommand(command, weights=INTERPOLATION_WEIGHTS):
-    return [delta*weight for delta,weight in command,weights]
+    results = []
+    for i in range(0,len(command)):
+        results.append(command[i]*weights[i])
+    return results 
 
 def calculateTransform(prev, curr, index):
     """
