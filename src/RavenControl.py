@@ -38,10 +38,10 @@ class Listener(Leap.Listener):
         self.prevActiveFrameCounter = 0
         self.prevFrame = None
         self.currFrame = None
-        if operation_mode == "s":
-            self.rc = OR_RavenController()
-        elif operation_mode == "r":
-            self.rc = ROS_RavenController()
+        if operation_mode == "s" or operation_mode == "S":
+            self.rc = OR_RavenController(grip_type)
+        elif operation_mode == "r" or operation_mode == "R":
+            self.rc = ROS_RavenController(grip_type)
 
     def on_connect(self, controller):
         print "Connected"
@@ -83,9 +83,9 @@ class Listener(Leap.Listener):
         self.prevFrame = self.currFrame
         self.currFrame = frame 
         
-        pedal_down = self.check_clutch()
-        if pedal_down:
-            self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
+        #pedal_down = self.check_clutch()
+        #if pedal_down:
+        self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
 
 
 
@@ -116,6 +116,7 @@ class Listener(Leap.Listener):
             if not frame.hands.empty:
                 hand = frame.hands[0]
                 return False, hand.sphere_radius
+            return False, -10
 
     def check_active(self, frame):
         if not frame.hands.empty:
@@ -139,7 +140,7 @@ class Listener(Leap.Listener):
 def initialize(grip_option, mode_option):
     global grip_type
     grip_type = grip_option
-    global mode
+    global operation_mode
     operation_mode = mode_option 
     
     # Create a sample listener and controller

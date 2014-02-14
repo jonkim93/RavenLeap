@@ -14,7 +14,30 @@ import tfx
 #from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
 
 from General_Helper import *
+#====== CUSTOM SCRIPTS ===#
+from RavenKin import *
+from Constants import *
 
+import Leap
+
+from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
+
+#====== GENERAL ==========#
+import sys
+import getopt
+import math
+import numpy as np 
+from numpy import *
+from numpy.linalg import *
+from optparse import OptionParser
+
+import IPython
+import getch
+
+#====== CUSTOM SCRIPTS ===#
+from RavenKin import *
+from Constants import *
+from RavenControllers import *
 
 #========================= RAVEN CONTROLLER SUPERCLASS ========================================================================#
 
@@ -77,9 +100,10 @@ class RavenController(object):
 
 #========================= OPENRAVE SIMULATION RAVEN CONTROLLER CLASS ==========================================================#
 class OR_RavenController(RavenController):
-    def __init__(self, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
+    def __init__(self, grip, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
         super(OR_RavenController, self).__init__(x_scale, y_scale, z_scale)
-        self.configureOREnv()  
+        self.configureOREnv()
+        self.grip_type = grip   
 
     def updateActive(self, a):
         if self.active != a:
@@ -200,10 +224,10 @@ class OR_RavenController(RavenController):
             #print "GRASP JOINTS???"
 
 
-            if grip_type == "whole_hand":
+            if self.grip_type == "h":
                 max_distance = MAX_HAND_SPHERE_RADIUS
                 min_distance = MIN_HAND_SPHERE_RADIUS
-            elif grip_type == "two_finger":
+            elif self.grip_type == "t":
                 max_distance = MAX_TWO_FINGER_DIST
                 min_distance = MIN_TWO_FINGER_DIST
 
@@ -236,12 +260,13 @@ class OR_RavenController(RavenController):
 
 #========================= ROS RAVEN CONTROLLER CLASS ==========================================================================#
 class ROS_RavenController(RavenController):
-    def __init__(self, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
+    def __init__(self, grip, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
         self.x_scale = x_scale
         self.y_scale = y_scale
         self.z_scale = z_scale 
         self.active = False
+        self.grip_type = grip 
 
     def run(self, p, c, grip, tipDistance):
         if self.active:
