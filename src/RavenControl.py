@@ -115,25 +115,30 @@ class Listener(Leap.Listener):
         elif grip_type == "h":
             if not frame.hands.empty:
                 hand = frame.hands[0]
+
+                #print "HAND SPHERE RADIUS: ", hand.sphere_radius
                 return False, hand.sphere_radius
             return False, -10
 
     def check_active(self, frame):
-        if not frame.hands.empty:
-            hand = frame.hands[0]
-            fingers = hand.fingers
-            #print "ACTIVE FRAME COUNTER"
-            #print self.prevActiveFrameCounter
-            if len(fingers) <= 2:
-                self.prevActiveFrameCounter += 1
-                if self.prevActiveFrameCounter > ACTIVE_THRESHOLD:
-                    return True
+        if grip_type == "t":
+            if not frame.hands.empty:
+                hand = frame.hands[0]
+                fingers = hand.fingers
+                #print "ACTIVE FRAME COUNTER"
+                #print self.prevActiveFrameCounter
+                if len(fingers) <= 2:
+                    self.prevActiveFrameCounter += 1
+                    if self.prevActiveFrameCounter > ACTIVE_THRESHOLD:
+                        return True
+                    else:
+                        return False
                 else:
+                    self.prevActiveFrameCounter = 0
                     return False
-            else:
-                self.prevActiveFrameCounter = 0
-                return False
-        return False
+            return False
+        elif grip_type == "h":
+            return True
 
 
 #================= MAIN ================#

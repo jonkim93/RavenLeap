@@ -77,8 +77,7 @@ class RavenController(object):
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None): # if we have a valid translation/rotation
                 dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.y_scale, translation[1]*self.z_scale)         
-                #dx, dy, dz = scaleDeltaCommand(calculateDeltaCommand(translation, self.x_scale, self.y_scale, self.z_scale))  #FIXME: THIS MAY NOT WORK
-
+                
                 x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
                 delta_rotation = np.matrix([x_basis, y_basis, z_basis])
                 currOrientation = tfx.tb_angles(-90,90,0)
@@ -225,6 +224,7 @@ class OR_RavenController(RavenController):
 
 
             if self.grip_type == "h":
+                print "here"
                 max_distance = MAX_HAND_SPHERE_RADIUS
                 min_distance = MIN_HAND_SPHERE_RADIUS
             elif self.grip_type == "t":
