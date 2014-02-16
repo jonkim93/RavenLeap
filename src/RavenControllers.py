@@ -81,18 +81,16 @@ class RavenController(object):
                 x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
                 delta_rotation = np.matrix([x_basis, y_basis, z_basis])
                 currOrientation = tfx.tb_angles(-90,90,0)
-                #print currOrientation
 
                 if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND:
                     (dx, dy, dz) = (0,0,0)
                     currOrientation = prevOrientation
-            else:  # DOC: if we don't have a valid translation/rotation, don't move
+            else:  
                 dx, dy, dz = (0,0,0)
                 currOrientation = prevOrientation
         else: # if we don't have frames, also don't move
             dx, dy, dz = (0,0,0)
             currOrientation = prevOrientation
-        #print "dx, dy, dz = "+str(dx)+", "+str(dy)+", "+str(dz)
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz) # ADD IN THE DELTA COMMAND
         return (dx, dy, dz), currOrientation 
 
