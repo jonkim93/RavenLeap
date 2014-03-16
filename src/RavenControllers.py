@@ -32,7 +32,7 @@ from numpy.linalg import *
 from optparse import OptionParser
 
 import IPython
-import getch
+#import getch
 
 #====== CUSTOM SCRIPTS ===#
 from RavenKin import *
@@ -222,7 +222,7 @@ class OR_RavenController(RavenController):
 
 
             if self.grip_type == "h":
-                print "here"
+                #print "here"
                 max_distance = MAX_HAND_SPHERE_RADIUS
                 min_distance = MIN_HAND_SPHERE_RADIUS
             elif self.grip_type == "t":

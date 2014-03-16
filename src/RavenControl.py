@@ -20,9 +20,9 @@ from numpy import *
 from numpy.linalg import *
 from optparse import OptionParser
 
-import pygame
-import IPython
-import getch
+#import pygame
+#import IPython
+#import getch
 
 #====== CUSTOM SCRIPTS ===#
 from RavenKin import *
@@ -77,22 +77,22 @@ class Listener(Leap.Listener):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
 
-        pygame.init()
-        pygame.event.pump()
-        keys = pygame.key.get_pressed()
-        print keys 
-        if keys[pygame.K_SPACE]:
-            print "space========================================="
-            active = self.check_active(frame)
-            grip, tipDistance = self.check_grip(frame)
+        #pygame.init()
+        #pygame.event.pump()
+        #keys = pygame.key.get_pressed()
+        #print keys 
+        #if keys[pygame.K_SPACE]:
+        #    print "space========================================="
+        active = self.check_active(frame)
+        grip, tipDistance = self.check_grip(frame)
 
-            self.rc.updateActive(active)
-            
-            self.prevFrame = self.currFrame
-            self.currFrame = frame 
-            self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
-        else:
-            print "no space"
+        self.rc.updateActive(active)
+        
+        self.prevFrame = self.currFrame
+        self.currFrame = frame 
+        self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
+        #else:
+        #    print "no space"
             
         
 
