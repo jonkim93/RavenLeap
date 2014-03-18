@@ -12,13 +12,20 @@ from Leap import CircleGesture, KeyTapGesture, ScreenTapGesture, SwipeGesture
 
 #====== GENERAL ==========#
 import sys
-import select
+#from select import select
 import getopt
 import math
-import numpy as np 
+import numpy as np
+
+import tty
+import termios
+
 from numpy import *
 from numpy.linalg import *
 from optparse import OptionParser
+
+import pygame 
+from pygame.locals import *
 
 #import pygame
 #import IPython
@@ -33,17 +40,86 @@ from RavenControllers import *
 grip_type = "h"  # or can be "t"
 operation_mode = "s"  # or can be "r"
 
+"""
+def check_clutch():
+    def isData():
+        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+    clutch_down = False
+    old_settings = termios.tcgetattr(sys.stdin)
+    try:
+        tty.setcbreak(sys.stdin.fileno())
+
+        if isData():
+            c = sys.stdin.read(1)
+            print c 
+            if c == '\x1b':         # x1b is ESC
+                return
+            if c == ' ':
+                print "space"
+                clutch_down = True                   
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    return clutch_down
+"""
+
+
+
+
 #========================= LEAP MOTION LISTENER CLASS ======================================================#
 class Listener(Leap.Listener):
+    def isData(self):
+        import select
+        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+
+    def consoleBased(self):
+        #this works but you need to have your cursor in the console
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setcbreak(sys.stdin.fileno())
+            while 1:
+                if self.isData():
+                    c = sys.stdin.read(1)
+                    #print c 
+                    if c == '\x1b':         # x1b is ESC
+                        break
+                    if c == ' ':
+                        print "space"
+        finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    
+    def pygameBased(self):
+        pygame.init()
+        screen = pygame.display.set_mode( (320,240) )
+        pygame.display.set_caption('Clutch Pedal Window')
+        screen.fill((159, 182, 205))
+        done = False
+        while not done:
+            pygame.event.pump()
+            keys = pygame.key.get_pressed()
+            #print keys
+            if keys[K_ESCAPE]:
+                done = True
+            if keys[K_SPACE]:
+                print "active"
+                self.clutch_down = True
+            else:
+                self.clutch_down = False 
+            
+    
+
     def on_init(self, controller):
         print "Initialized"
         self.prevActiveFrameCounter = 0
         self.prevFrame = None
         self.currFrame = None
+        self.clutch_down = False
         if operation_mode == "s" or operation_mode == "S":
             self.rc = OR_RavenController(grip_type)
         elif operation_mode == "r" or operation_mode == "R":
             self.rc = ROS_RavenController(grip_type)
+        #self.consoleBased()
+        #self.pygameBased()
+
 
     def on_connect(self, controller):
         print "Connected"
@@ -73,38 +149,19 @@ class Listener(Leap.Listener):
         if state == Leap.Gesture.STATE_INVALID:
             return "STATE_INVALID"
 
+
+
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
-
-        #pygame.init()
-        #pygame.event.pump()
-        #keys = pygame.key.get_pressed()
-        #print keys 
-        #if keys[pygame.K_SPACE]:
-        #    print "space========================================="
         active = self.check_active(frame)
         grip, tipDistance = self.check_grip(frame)
-
         self.rc.updateActive(active)
-        
         self.prevFrame = self.currFrame
-        self.currFrame = frame 
-        self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance)
-        #else:
-        #    print "no space"
-            
+        self.currFrame = frame
+        if self.clutch_down:
+            self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance) 
         
-
-        
-
-
-
-    def check_clutch(self):
-        z = getch.getch()
-        if ord(z) == 32: #a space bar
-            return True
-        return False
 
     def check_grip(self, frame):
         if grip_type == "t":
@@ -169,6 +226,7 @@ def initialize(grip_option, mode_option):
 
     controller.add_listener(listener)   # Keep this process running until Enter is pressed
 
+    listener.pygameBased()
     print "Press Enter to quit..."
     sys.stdin.readline()
     
