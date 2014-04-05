@@ -27,6 +27,9 @@ from optparse import OptionParser
 import pygame 
 from pygame.locals import *
 
+from threading import Thread 
+
+import time
 #import pygame
 #import IPython
 #import getch
@@ -39,74 +42,61 @@ from RavenControllers import *
 #====== GLOBAL =========#
 grip_type = "h"  # or can be "t"
 operation_mode = "s"  # or can be "r"
+clutch_down = True
 
-"""
-def check_clutch():
-    def isData():
-        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
-    clutch_down = False
+def pygameBased():
+    global clutch_down
+    pygame.init()
+    screen = pygame.display.set_mode( (320,240) )
+    pygame.display.set_caption('Clutch Pedal Window')
+    screen.fill((159, 182, 205))
+    done = False
+    while not done:
+        pygame.event.pump()
+        keys = pygame.key.get_pressed()
+        print time.clock()
+        if keys[K_ESCAPE]:
+            done = True
+        if keys[K_SPACE]:
+            #print "active"
+            clutch_down = True
+        else:
+            clutch_down = False 
+
+def isData():
+    import select
+    return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+
+def consoleBased():
+    global clutch_down
+    #this works but you need to have your cursor in the console
     old_settings = termios.tcgetattr(sys.stdin)
     try:
         tty.setcbreak(sys.stdin.fileno())
-
-        if isData():
-            c = sys.stdin.read(1)
-            print c 
-            if c == '\x1b':         # x1b is ESC
-                return
-            if c == ' ':
-                print "space"
-                clutch_down = True                   
+        while 1:
+            clutch_down = False
+            if isData():
+                c = sys.stdin.read(1)
+                #print c 
+                if c == '\x1b':         # x1b is ESC
+                    break
+                if c == ' ':
+                    clutch_down = True
+                    print "space"
+                else:
+                    clutch_down = False
     finally:
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-    return clutch_down
-"""
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
 
-
-
+def initializeListener(controller, listener):
+    controller.add_listener(listener)   # Keep this process running until Enter is pressed
+    print "Press Enter to quit..."
+    sys.stdin.readline()
+    controller.remove_listener(listener) # Remove the sample listener when done
 
 #========================= LEAP MOTION LISTENER CLASS ======================================================#
 class Listener(Leap.Listener):
-    def isData(self):
-        import select
-        return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
-
-    def consoleBased(self):
-        #this works but you need to have your cursor in the console
-        old_settings = termios.tcgetattr(sys.stdin)
-        try:
-            tty.setcbreak(sys.stdin.fileno())
-            while 1:
-                if self.isData():
-                    c = sys.stdin.read(1)
-                    #print c 
-                    if c == '\x1b':         # x1b is ESC
-                        break
-                    if c == ' ':
-                        print "space"
-        finally:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
     
-    def pygameBased(self):
-        pygame.init()
-        screen = pygame.display.set_mode( (320,240) )
-        pygame.display.set_caption('Clutch Pedal Window')
-        screen.fill((159, 182, 205))
-        done = False
-        while not done:
-            pygame.event.pump()
-            keys = pygame.key.get_pressed()
-            #print keys
-            if keys[K_ESCAPE]:
-                done = True
-            if keys[K_SPACE]:
-                print "active"
-                self.clutch_down = True
-            else:
-                self.clutch_down = False 
-            
-    
-
     def on_init(self, controller):
         print "Initialized"
         self.prevActiveFrameCounter = 0
@@ -159,7 +149,8 @@ class Listener(Leap.Listener):
         self.rc.updateActive(active)
         self.prevFrame = self.currFrame
         self.currFrame = frame
-        if self.clutch_down:
+        if clutch_down:
+            #print time.clock()
             self.rc.run(self.prevFrame, self.currFrame, grip, tipDistance) 
         
 
@@ -222,15 +213,12 @@ def initialize(grip_option, mode_option):
     listener = Listener()
     controller = Leap.Controller()
 
-    print "\tcontroller initalized"     # Have the sample listener receive events from the controller
-
-    controller.add_listener(listener)   # Keep this process running until Enter is pressed
-
-    listener.pygameBased()
-    print "Press Enter to quit..."
-    sys.stdin.readline()
-    
-    controller.remove_listener(listener) # Remove the sample listener when done
+    thread1 = Thread(target = initializeListener, args = (controller, listener))
+    thread2 = Thread(target = pygameBased)
+    thread2.start()
+    thread1.start()
+    thread1.join()
+    thread2.join()
 
 
 

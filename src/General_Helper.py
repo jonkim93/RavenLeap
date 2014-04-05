@@ -36,7 +36,9 @@ def calculateTransform(prev, curr, index):
     if type(currHand) != type(None):
         translation = currHand.translation(prev) #this is a Leap.Vector!!
         rot_matrix  = currHand.rotation_matrix(prev) # this is a Leap.Matrix!!
-        return translation, rot_matrix    
+        palm_normal = currHand.palm_normal
+        palm_direction = currHand.direction
+        return translation, rot_matrix, palm_normal, palm_direction    
     else:
         #print "CURRHAND IS NONE"
         return None, None

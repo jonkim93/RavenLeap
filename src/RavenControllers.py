@@ -42,11 +42,12 @@ from RavenControllers import *
 #========================= RAVEN CONTROLLER SUPERCLASS ========================================================================#
 
 class RavenController(object):
-    def __init__(self, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
+    def __init__(self, FIXED_ORIENTATION=True, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
         self.x_scale = x_scale
         self.y_scale = y_scale
         self.z_scale = z_scale 
         self.active = False 
+        self.FIXED_ORIENTATION = FIXED_ORIENTATION
 
     
     # ----  THESE METHODS NEED TO BE OVERRIDDEN ---- #
@@ -69,26 +70,51 @@ class RavenController(object):
 
     def calculateDeltaPose(self, prev_frame, curr_frame, grip, tipDistance):  #TODO: MEASURE CHANGE IN POSE -- ABSOLUTE? 
         #ROTATION = tfx.pose([0,0,0],[0,180,90]).matrix 
+        #print "here"
         prevPose = self.prevPose
         #prevPose = ROTATION*prevPose 
         prev_x, prev_y, prev_z = prevPose.translation.x, prevPose.translation.y, prevPose.translation.z
         prevOrientation = prevPose.orientation
-        if type(prev_frame) != type(None) and type(curr_frame) != type(None): #if we actually have frames
-            translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
-            if type(translation) != type(None) and type(rotation) != type(None): # if we have a valid translation/rotation
+        if type(prev_frame) != type(None) and type(curr_frame) != type(None): 
+            # IF we actually have frames
+            translation, rotation, palm_normal, palm_direction = calculateTransform(prev_frame, curr_frame, 0)
+            if type(translation) != type(None) and type(rotation) != type(None): 
+                # IF we have a valid translation/rotation
+
+                # translation stuff
                 dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.y_scale, translation[1]*self.z_scale)         
                 
-                x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
-                delta_rotation = np.matrix([x_basis, y_basis, z_basis])
-                currOrientation = tfx.tb_angles(-90,90,0)
+                # orientation stuff
+                
+                if self.FIXED_ORIENTATION:
+                    #print "fixed"
+                    currOrientation = tfx.tb_angles(-90,90,0)
+                else:
+                    y = palm_direction.yaw 
+                    p = palm_direction.pitch 
+                    r = palm_normal.roll
+                    y *= 57.2957795   # convert to degrees
+                    p *= 57.2957795
+                    r *= 57.2957795
 
-                if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND:
+                    y += -90  # adjust values for frame transformation
+                    p += 90
+                    r += 0
+                    print "YPR: "+str(y) + ", "+str(p) + ", "+str(r)
+                    currOrientation = tfx.tb_angles(y, p, r)
+                    print "CURR ORIENTATION: "+str(currOrientation)
+                    print "PALM NORMAL:      "+str(palm_normal)
+
+                if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND: 
+                    # IF the movement goes beyond bounds, don't do it
                     (dx, dy, dz) = (0,0,0)
                     currOrientation = prevOrientation
             else:  
+                # IF we don't have a valid translation or rotation, don't move
                 dx, dy, dz = (0,0,0)
                 currOrientation = prevOrientation
-        else: # if we don't have frames, also don't move
+        else: 
+            # IF we don't have frames, also don't move
             dx, dy, dz = (0,0,0)
             currOrientation = prevOrientation
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz) # ADD IN THE DELTA COMMAND
@@ -179,24 +205,8 @@ class OR_RavenController(RavenController):
 
             # calculate new joints
             invkin_pass, nextJoints, array_indices = self.calculateJoints(currPose, grip, tipDistance)
-
-
-            #==============  THIS STUFF IS EXPERIMENTAL ===========#
-            # weight joints
-            if EXP:
-                newJoints = scaleAndAddDeltaJoints(prevJoints,nextJoints)
-                print "HERE"
-                try:
-                    print "JOINT WEIGHTS: "+JOINT_WEIGHTS
-                    newPose = fwdArmKin(0, newJoints)[0]
-                    resultJoints = newJoints
-                except Exception:
-                    print "JOINT WEIGHTING FAILED"
-                    newPose = currPose
-                    resultJoints = nextJoints   #============== END EXPERIMENTAL STUFF ================#
-            else:
-                resultJoints = nextJoints
-                newPose = currPose             
+            resultJoints = nextJoints
+            newPose = currPose             
             if invkin_pass:
                 self.prevPose = newPose
             return resultJoints, array_indices
@@ -298,7 +308,7 @@ class ROS_RavenController(RavenController):
         (dx, dy, dz), newOrientation = super(RavenController, self).calculateDeltaPose(p, c, grip, tipDistance)
 
         if p != None and c != None:
-            translation, rot_matrix = calculateTransform(p, c, arm)
+            translation, rot_matrix, palm_normal, palm_direction = calculateTransform(p, c, arm)
             arm_cmd = ArmCommand()
             tool_cmd = ToolCommand()
             tool_cmd.pose_option = ToolCommand.POSE_OFF
