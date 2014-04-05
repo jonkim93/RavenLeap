@@ -100,7 +100,7 @@ class Listener(Leap.Listener):
             if keys[K_ESCAPE]:
                 done = True
             if keys[K_SPACE]:
-                print "active"
+                #print "active"
                 self.clutch_down = True
             else:
                 self.clutch_down = False 
@@ -220,11 +220,17 @@ def initialize(grip_option, mode_option):
     print "initializing . . ."
 
     listener = Listener()
+    if mode_option == "r":
+    	print "initialized node"
+    	rospy.init_node("RavenLeap")
     controller = Leap.Controller()
 
     print "\tcontroller initalized"     # Have the sample listener receive events from the controller
 
     controller.add_listener(listener)   # Keep this process running until Enter is pressed
+
+    #if mode_option == "r":
+    #	rospy.spin()
 
     listener.pygameBased()
     print "Press Enter to quit..."

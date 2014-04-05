@@ -4,13 +4,13 @@
 import openravepy as rave
 
 #====== ROS      =========#
-#import tf
-#import tf.transformations as tft
+import tf
+import tf.transformations as tft
 import tfx
 #import roslib; roslib.load_manifest("raven_2_teleop")
-#import rospy
-#from raven_2_msgs.msg import *
-#from geometry_msgs.msg import Pose, Point, Quaternion
+import rospy
+from raven_2_msgs.msg import *
+from geometry_msgs.msg import Pose, Point, Quaternion
 #from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
 
 from General_Helper import *
@@ -260,25 +260,59 @@ class OR_RavenController(RavenController):
 class ROS_RavenController(RavenController):
     def __init__(self, grip, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
+        self.tool_pose_sub = rospy.Subscriber('raven_state', RavenState, self.updatePrevPose)
         self.x_scale = x_scale
         self.y_scale = y_scale
         self.z_scale = z_scale 
         self.active = False
         self.grip_type = grip 
+        self.prevPose = None 
 
     def run(self, p, c, grip, tipDistance):
         if self.active:
             raven_command = self.getRavenCommand(p,c,grip,tipDistance)  # start continually publishing raven commands based on input from the leapmotion
+            print raven_command
             self.raven_pub.publish(raven_command)
 
+    def updatePrevPose(self, msg):
+        self.prevPose = msg.arms[0].tool.pose   #FIXME: WHEN WE IMPLEMENT TWO HANDS, NEED TO FIX THIS
+
     #========================== ROBOT/ROS COMMANDS =================================#
+
+    def calculateDeltaPose(self, prev_frame, curr_frame, grip, tipDistance):  #TODO: MEASURE CHANGE IN POSE -- ABSOLUTE? 
+        prevPose = self.prevPose
+        #prevPose = ROTATION*prevPose 
+        prev_x, prev_y, prev_z = prevPose.position.x, prevPose.position.y, prevPose.position.z
+        prevOrientation = tfx.tb_angles((prevPose.orientation.x, prevPose.orientation.y, prevPose.orientation.z, prevPose.orientation.w))
+        if type(prev_frame) != type(None) and type(curr_frame) != type(None): #if we actually have frames
+            translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
+            if type(translation) != type(None) and type(rotation) != type(None): # if we have a valid translation/rotation
+                dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.y_scale, translation[1]*self.z_scale)         
+                
+                #x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
+                #delta_rotation = np.matrix([x_basis, y_basis, z_basis])
+                currOrientation = tfx.tb_angles(-90,90,0)
+
+                if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND:
+                    (dx, dy, dz) = (0,0,0)
+                    currOrientation = prevOrientation
+            else:  
+                dx, dy, dz = (0,0,0)
+                currOrientation = prevOrientation
+        else: # if we don't have frames, also don't move
+            dx, dy, dz = (0,0,0)
+            currOrientation = prevOrientation
+        curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz) # ADD IN THE DELTA COMMAND
+        return (dx, dy, dz), currOrientation 
+
+
     def getRavenCommand(self, p, c, grip, tipDistance):
         """
         Calculates a raven command based off of LeapMotion frames
         """
         raven_command = RavenCommand()
         raven_command.header.stamp = rospy.Time.now()
-        raven_command.header.frame_id = BASE_FRAME
+        raven_command.header.frame_id = '/0_link'
                 
         raven_command.controller = Constants.CONTROLLER_CARTESIAN_SPACE
         leftArmCommand = self.getArmCommand(0, p, c, grip, tipDistance)
@@ -294,15 +328,14 @@ class ROS_RavenController(RavenController):
         """
         Given an arm index, calculates and returns the proper arm command based off of the LeapMotion frames 
         """
-        
-        (dx, dy, dz), newOrientation = super(RavenController, self).calculateDeltaPose(p, c, grip, tipDistance)
+        (dx, dy, dz), newOrientation = self.calculateDeltaPose(p, c, grip, tipDistance)
 
-        if p != None and c != None:
+        if type(p) != type(None) and type(c) != type(None):
             translation, rot_matrix = calculateTransform(p, c, arm)
             arm_cmd = ArmCommand()
             tool_cmd = ToolCommand()
-            tool_cmd.pose_option = ToolCommand.POSE_OFF
-
+            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_ABS
+            """
             try:
                 (trans, rot) = self.listener.lookupTransform(BASE_FRAME, END_EFFECTOR_FRAME_PREFIX+END_EFFECTOR_FRAME_SUFFIX[i], rospy.Time(0))
             except (tf.LookupException, tf.ConnectivityException):
@@ -311,23 +344,13 @@ class ROS_RavenController(RavenController):
                 else:
                     print "no transform for right!"
                 return
-            xx, yy, zz, ww = (1, 0, 0, 0)  #FIXME: identity quaternion for now; will replace once we start focusing on 
-            #print "dx: "+dx+"  dy: "+dy+"  dz: "+dz+"\n"
 
-            #FIXME: this stuff is probably wrong
+            """
             
-            p = mat(array([dx,dy,dz,1])).transpose()
-            T1 = mat(array([[0,1,0,0],  [-1,0,0,0],  [0,0, 1,0], [0,0,0,1]]))
-            p_t = array(T1 * p)[0:3].flatten().tolist()
+            ori = Quaternion(newOrientation.quaternion[0], newOrientation.quaternion[1], newOrientation.quaternion[2], newOrientation.quaternion[3])
 
-            qmat = T1 * mat(tft.quaternion_matrix(array([xx,yy,zz,ww])))
-            q_t = array(tft.quaternion_from_matrix(qmat)).flatten().tolist()
-            tool_cmd.pose_option = ToolCommand.POSE_RELATIVE #FIXME: this sets the toolcommand to relative pose commands
-
-            tool_cmd.pose = Pose(Point(*p_t),Quaternion(*q_t))
-
-            #FIXME: will need to add in grip commands later
-
+            pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)
+            tool_cmd.pose = Pose(pos, ori)
             arm_cmd.tool_command = tool_cmd
             return arm_cmd
         else:
