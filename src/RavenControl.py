@@ -28,8 +28,10 @@ import pygame
 from pygame.locals import *
 
 #import pygame
-#import IPython
+import IPython
 #import getch
+
+import time
 
 #====== CUSTOM SCRIPTS ===#
 from RavenKin import *
@@ -87,23 +89,42 @@ class Listener(Leap.Listener):
         finally:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
     
+    def display(self, s, font, screen):
+        text = font.render(s, True, (255, 255, 255), (159, 182, 205))
+        textRect = text.get_rect()
+        textRect.centerx = screen.get_rect().centerx
+        textRect.centery = screen.get_rect().centery
+
+        screen.blit(text, textRect)
+        pygame.display.update()
+
     def pygameBased(self):
         pygame.init()
         screen = pygame.display.set_mode( (320,240) )
         pygame.display.set_caption('Clutch Pedal Window')
         screen.fill((159, 182, 205))
         done = False
+        f = pygame.font.SysFont('helvetica', 24)
         while not done:
-            pygame.event.pump()
-            keys = pygame.key.get_pressed()
-            #print keys
-            if keys[K_ESCAPE]:
-                done = True
-            if keys[K_SPACE]:
-                #print "active"
-                self.clutch_down = True
-            else:
-                self.clutch_down = False 
+			s = 'SCALE: '+str(self.rc.x_scale)
+			self.display(s,f, screen)
+			pygame.event.pump()
+			print time.clock()
+			keys = pygame.key.get_pressed()
+			if keys[K_ESCAPE]:
+				done = True
+			elif keys[K_SPACE]:
+			    self.clutch_down = True
+			elif keys[K_UP]:
+				self.rc.scaleUp()
+				print self.rc.x_scale
+			elif keys[K_DOWN]:
+				self.rc.scaleDown()
+				print self.rc.x_scale
+			else:
+			    self.clutch_down = False 
+			
+			
             
     
 

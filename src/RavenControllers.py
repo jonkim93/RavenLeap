@@ -9,8 +9,9 @@ import tf.transformations as tft
 import tfx
 #import roslib; roslib.load_manifest("raven_2_teleop")
 import rospy
+from std_msgs.msg import Header
 from raven_2_msgs.msg import *
-from geometry_msgs.msg import Pose, Point, Quaternion
+from geometry_msgs.msg import Pose, Point, Quaternion, PoseStamped
 #from raven_2_trajectory.srv import RecordTrajectory, RecordTrajectoryResponse
 
 from General_Helper import *
@@ -56,6 +57,18 @@ class RavenController(object):
 
     def calculateNewPose(self):
     	pass
+
+    def scaleUp(self):
+        if self.x_scale < 0.002:
+            self.x_scale = float(self.x_scale*(6/float(5)))
+            self.y_scale = float(self.y_scale*(6/float(5)))
+            self.z_scale = float(self.z_scale*(6/float(5)))
+
+    def scaleDown(self):
+        if self.x_scale > 0.000002:
+            self.x_scale = float(self.x_scale*(5/float(6)))
+            self.y_scale = float(self.y_scale*(5/float(6)))
+            self.z_scale = float(self.z_scale*(5/float(6)))
 
 
     # ----  THESE METHODS ARE FINE AS IS ---------- #
@@ -260,6 +273,8 @@ class OR_RavenController(RavenController):
 class ROS_RavenController(RavenController):
     def __init__(self, grip, x_scale=X_SCALE, y_scale=Y_SCALE, z_scale=Z_SCALE, frame=None, relative_orientation=False, camera_frame=False):
         self.raven_pub = rospy.Publisher('raven_command', RavenCommand)
+        self.tool_pose_pub = rospy.Publisher('leap_motion_pose', PoseStamped)
+        self.num = 0
         self.tool_pose_sub = rospy.Subscriber('raven_state', RavenState, self.updatePrevPose)
         self.x_scale = x_scale
         self.y_scale = y_scale
@@ -267,31 +282,30 @@ class ROS_RavenController(RavenController):
         self.active = False
         self.grip_type = grip 
         self.prevPose = None 
+        self.firstPose = False
 
     def run(self, p, c, grip, tipDistance):
         if self.active:
             raven_command = self.getRavenCommand(p,c,grip,tipDistance)  # start continually publishing raven commands based on input from the leapmotion
-            print raven_command
+            #print raven_command
             self.raven_pub.publish(raven_command)
 
     def updatePrevPose(self, msg):
-        self.prevPose = msg.arms[0].tool.pose   #FIXME: WHEN WE IMPLEMENT TWO HANDS, NEED TO FIX THIS
+        if not self.firstPose:
+            self.prevPose = msg.arms[1].tool.pose   #FIXME: WHEN WE IMPLEMENT TWO HANDS, NEED TO FIX THIS
+            self.firstPose = True 
 
     #========================== ROBOT/ROS COMMANDS =================================#
 
     def calculateDeltaPose(self, prev_frame, curr_frame, grip, tipDistance):  #TODO: MEASURE CHANGE IN POSE -- ABSOLUTE? 
         prevPose = self.prevPose
-        #prevPose = ROTATION*prevPose 
         prev_x, prev_y, prev_z = prevPose.position.x, prevPose.position.y, prevPose.position.z
         prevOrientation = tfx.tb_angles((prevPose.orientation.x, prevPose.orientation.y, prevPose.orientation.z, prevPose.orientation.w))
         if type(prev_frame) != type(None) and type(curr_frame) != type(None): #if we actually have frames
             translation, rotation = calculateTransform(prev_frame, curr_frame, 0)
             if type(translation) != type(None) and type(rotation) != type(None): # if we have a valid translation/rotation
-                dx, dy, dz = (translation[0]*self.x_scale, translation[2]*self.y_scale, translation[1]*self.z_scale)         
-                
-                #x_basis, y_basis, z_basis = (rotation.x_basis.to_float_array(), rotation.y_basis.to_float_array(), rotation.z_basis.to_float_array())
-                #delta_rotation = np.matrix([x_basis, y_basis, z_basis])
-                currOrientation = tfx.tb_angles(-90,90,0)
+                dx, dy, dz = (-translation[0]*self.x_scale, translation[2]*self.y_scale, translation[1]*self.z_scale)         # DOING TRANSFORM FROM LEAPMOTION FRAME TO 0_LINK CHECK WITH JEFF
+                currOrientation = tfx.tb_angles(90,90,0)
 
                 if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND:
                     (dx, dy, dz) = (0,0,0)
@@ -316,7 +330,7 @@ class ROS_RavenController(RavenController):
                 
         raven_command.controller = Constants.CONTROLLER_CARTESIAN_SPACE
         leftArmCommand = self.getArmCommand(0, p, c, grip, tipDistance)
-        rightArmCommand = self.getArmCommand(1, p, c, grip, tipDistance)
+        rightArmCommand = self.getArmCommand(1, None, None, grip, tipDistance)
         raven_command.arm_names = ['left', 'right']
         raven_command.arms = [leftArmCommand, rightArmCommand]
 
@@ -330,27 +344,36 @@ class ROS_RavenController(RavenController):
         """
         (dx, dy, dz), newOrientation = self.calculateDeltaPose(p, c, grip, tipDistance)
 
+        RVIZ = True
+
         if type(p) != type(None) and type(c) != type(None):
             translation, rot_matrix = calculateTransform(p, c, arm)
             arm_cmd = ArmCommand()
             tool_cmd = ToolCommand()
-            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_ABS
-            """
-            try:
-                (trans, rot) = self.listener.lookupTransform(BASE_FRAME, END_EFFECTOR_FRAME_PREFIX+END_EFFECTOR_FRAME_SUFFIX[i], rospy.Time(0))
-            except (tf.LookupException, tf.ConnectivityException):
-                if i==0:
-                    print "no transform for left arm!"
-                else:
-                    print "no transform for right!"
-                return
-
-            """
+            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_OFF  #CHECK WITH JEFF
             
             ori = Quaternion(newOrientation.quaternion[0], newOrientation.quaternion[1], newOrientation.quaternion[2], newOrientation.quaternion[3])
+            #pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)  #ABSOLUTE POSITION
+            pos = Point(dx, dy, dz)  # RELATIVE POSITION USED
 
-            pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)
-            tool_cmd.pose = Pose(pos, ori)
+            # EXPERIMENTAL -- ONLY FOR RVIZ PURPOSES -- DELETE WHEN USING ACTUAL ROBOT
+            if RVIZ:
+                prevPose = self.prevPose
+                self.prevPose.position = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)   #
+            # EXPERIMENTAL -- ONLY FOR RVIZ
+
+            self.num+=1
+            tool_cmd.pose = PoseStamped()
+            tool_cmd.pose.header.seq = self.num
+            tool_cmd.pose.header.frame_id = "/0_link"
+            tool_cmd.pose.header.stamp = rospy.Time.now()
+            tool_cmd.pose.pose.orientation = ori
+
+            if RVIZ:
+                tool_cmd.pose.pose.position = self.prevPose.position
+            else:
+                tool_cmd.pose.pose.position = pos 
+            self.tool_pose_pub.publish(tool_cmd.pose)
             arm_cmd.tool_command = tool_cmd
             return arm_cmd
         else:
@@ -358,7 +381,21 @@ class ROS_RavenController(RavenController):
                 print "currFrame equals none"
             if prevFrame == None:
                 print "prevFrame equals none"
-            return
+            arm_cmd = ArmCommand()
+            tool_cmd = ToolCommand()
+            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_OFF
+            ori = Quaternion(0,0,0,0)  # CHECK WITH JEFF
+            #pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)  #ABSOLUTE POSITION
+            pos = Point(0,0,0)  # RELATIVE POSITION USED
+            self.num+=1
+            tool_cmd.pose = PoseStamped()
+            tool_cmd.pose.header.seq = self.num
+            tool_cmd.pose.header.frame_id = "/0_link"
+            tool_cmd.pose.header.stamp = rospy.Time.now()
+            tool_cmd.pose.pose.orientation = ori
+            tool_cmd.pose.pose.position = pos 
+            arm_cmd.tool_command = tool_cmd
+            return arm_cmd
 
 #=========== OR HELPER FUNCTIONS   =======================
 def calculateDeltaJoints(prevJoints,nextJoints):
