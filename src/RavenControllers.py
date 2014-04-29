@@ -40,6 +40,8 @@ from RavenKin import *
 from Constants import *
 from RavenControllers import *
 
+RVIZ = False
+
 #========================= RAVEN CONTROLLER SUPERCLASS ========================================================================#
 
 class RavenController(object):
@@ -282,18 +284,27 @@ class ROS_RavenController(RavenController):
         self.active = False
         self.grip_type = grip 
         self.prevPose = None 
+        # DELETEEE
+        #self.prevPose = Pose()
+        #self.prevPose.position = Point(0,0,0)
+        #self.prevPose.orientation = Quaternion(0,0,0,0)
+
         self.firstPose = False
 
     def run(self, p, c, grip, tipDistance):
         if self.active:
             raven_command = self.getRavenCommand(p,c,grip,tipDistance)  # start continually publishing raven commands based on input from the leapmotion
-            #print raven_command
+            print raven_command
             self.raven_pub.publish(raven_command)
 
     def updatePrevPose(self, msg):
-        if not self.firstPose:
-            self.prevPose = msg.arms[1].tool.pose   #FIXME: WHEN WE IMPLEMENT TWO HANDS, NEED TO FIX THIS
-            self.firstPose = True 
+        if RVIZ:
+            if not self.firstPose:
+                self.prevPose = msg.arms[1].tool.pose   #FIXME: WHEN WE IMPLEMENT TWO HANDS, NEED TO FIX THIS
+                self.firstPose = True 
+        else:         
+            self.prevPose = msg.arms[1].tool.pose
+            #print self.prevPose
 
     #========================== ROBOT/ROS COMMANDS =================================#
 
@@ -309,13 +320,16 @@ class ROS_RavenController(RavenController):
 
                 if math.fabs(dx) > DX_UPPER_BOUND or math.fabs(dy) > DY_UPPER_BOUND or math.fabs(dz) > DZ_UPPER_BOUND:
                     (dx, dy, dz) = (0,0,0)
-                    currOrientation = prevOrientation
+                    currOrientation = tfx.tb_angles(90,90,0)
+                    #currOrientation = prevOrientation
             else:  
                 dx, dy, dz = (0,0,0)
-                currOrientation = prevOrientation
+                currOrientation = tfx.tb_angles(90,90,0)
+                #currOrientation = prevOrientation
         else: # if we don't have frames, also don't move
             dx, dy, dz = (0,0,0)
-            currOrientation = prevOrientation
+            currOrientation = tfx.tb_angles(90,90,0)
+            #currOrientation = prevOrientation
         curr_x, curr_y, curr_z = (prev_x+dx, prev_y+dy, prev_z+dz) # ADD IN THE DELTA COMMAND
         return (dx, dy, dz), currOrientation 
 
@@ -327,12 +341,15 @@ class ROS_RavenController(RavenController):
         raven_command = RavenCommand()
         raven_command.header.stamp = rospy.Time.now()
         raven_command.header.frame_id = '/0_link'
+
+        raven_command.source = "LeapRaven"   #FIX? i dunno if this will fix it
                 
         raven_command.controller = Constants.CONTROLLER_CARTESIAN_SPACE
         leftArmCommand = self.getArmCommand(0, p, c, grip, tipDistance)
         rightArmCommand = self.getArmCommand(1, None, None, grip, tipDistance)
-        raven_command.arm_names = ['left', 'right']
-        raven_command.arms = [leftArmCommand, rightArmCommand]
+        leftArmCommand.active = True
+        raven_command.arm_names = ['L']#, 'right']
+        raven_command.arms = [leftArmCommand] #, rightArmCommand]
 
         #FIXME: need to account for pedal down and up in leapmotion commands
         raven_command.pedal_down = True
@@ -342,19 +359,20 @@ class ROS_RavenController(RavenController):
         """
         Given an arm index, calculates and returns the proper arm command based off of the LeapMotion frames 
         """
-        (dx, dy, dz), newOrientation = self.calculateDeltaPose(p, c, grip, tipDistance)
-
-        RVIZ = True
-
+        
         if type(p) != type(None) and type(c) != type(None):
+            (dx, dy, dz), newOrientation = self.calculateDeltaPose(p, c, grip, tipDistance)
             translation, rot_matrix = calculateTransform(p, c, arm)
             arm_cmd = ArmCommand()
             tool_cmd = ToolCommand()
-            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_OFF  #CHECK WITH JEFF
+            tool_cmd.pose_option = ToolCommand.POSE_ABSOLUTE #POSE_POS_REL_ORI_ABS #POSE_ABSOLUTE #POS_ABS_ORI_ABS #CHECK WITH JEFF
             
-            ori = Quaternion(newOrientation.quaternion[0], newOrientation.quaternion[1], newOrientation.quaternion[2], newOrientation.quaternion[3])
-            #pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)  #ABSOLUTE POSITION
-            pos = Point(dx, dy, dz)  # RELATIVE POSITION USED
+            #ori = Quaternion(newOrientation.quaternion[0], newOrientation.quaternion[1], newOrientation.quaternion[2], newOrientation.quaternion[3])
+            ori = Quaternion(0.5,0.5,-0.5,0.5)
+            print "DELTA POSE"
+            print str(dx)+", "+str(dy)+", "+str(dz)
+            pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)  #ABSOLUTE POSITION
+            #pos = Point(dx, dy, dz)  # RELATIVE POSITION USED
 
             # EXPERIMENTAL -- ONLY FOR RVIZ PURPOSES -- DELETE WHEN USING ACTUAL ROBOT
             if RVIZ:
@@ -362,18 +380,21 @@ class ROS_RavenController(RavenController):
                 self.prevPose.position = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)   #
             # EXPERIMENTAL -- ONLY FOR RVIZ
 
-            self.num+=1
-            tool_cmd.pose = PoseStamped()
-            tool_cmd.pose.header.seq = self.num
-            tool_cmd.pose.header.frame_id = "/0_link"
-            tool_cmd.pose.header.stamp = rospy.Time.now()
-            tool_cmd.pose.pose.orientation = ori
+            
 
             if RVIZ:
+                self.num+=1
+                tool_cmd.pose = PoseStamped()
+                tool_cmd.pose.header.seq = self.num
+                tool_cmd.pose.header.frame_id = "/0_link"
+                tool_cmd.pose.header.stamp = rospy.Time.now()
+                tool_cmd.pose.pose.orientation = ori
                 tool_cmd.pose.pose.position = self.prevPose.position
+                self.tool_pose_pub.publish(tool_cmd.pose)
             else:
-                tool_cmd.pose.pose.position = pos 
-            self.tool_pose_pub.publish(tool_cmd.pose)
+                tool_cmd.pose = Pose()
+                tool_cmd.pose.position = pos 
+                tool_cmd.pose.orientation = ori            
             arm_cmd.tool_command = tool_cmd
             return arm_cmd
         else:
@@ -383,18 +404,24 @@ class ROS_RavenController(RavenController):
                 print "prevFrame equals none"
             arm_cmd = ArmCommand()
             tool_cmd = ToolCommand()
-            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_OFF
+            tool_cmd.pose_option = ToolCommand.POSE_POS_REL_ORI_ABS
             ori = Quaternion(0,0,0,0)  # CHECK WITH JEFF
             #pos = Point(self.prevPose.position.x + dx, self.prevPose.position.y + dy, self.prevPose.position.z + dz)  #ABSOLUTE POSITION
             pos = Point(0,0,0)  # RELATIVE POSITION USED
-            self.num+=1
-            tool_cmd.pose = PoseStamped()
-            tool_cmd.pose.header.seq = self.num
-            tool_cmd.pose.header.frame_id = "/0_link"
-            tool_cmd.pose.header.stamp = rospy.Time.now()
-            tool_cmd.pose.pose.orientation = ori
-            tool_cmd.pose.pose.position = pos 
-            arm_cmd.tool_command = tool_cmd
+            if RVIZ:
+                self.num+=1
+                tool_cmd.pose = PoseStamped()
+                tool_cmd.pose.header.seq = self.num
+                tool_cmd.pose.header.frame_id = "/0_link"
+                tool_cmd.pose.header.stamp = rospy.Time.now()
+                tool_cmd.pose.pose.orientation = ori
+                tool_cmd.pose.pose.position = pos 
+                arm_cmd.tool_command = tool_cmd
+            else:
+                tool_cmd.pose = Pose()
+                tool_cmd.pose.position = pos 
+                tool_cmd.pose.orientation = ori
+                arm_cmd.tool_command = tool_cmd
             return arm_cmd
 
 #=========== OR HELPER FUNCTIONS   =======================

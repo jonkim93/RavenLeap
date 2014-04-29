@@ -138,6 +138,8 @@ class Listener(Leap.Listener):
             self.rc = OR_RavenController(grip_type)
         elif operation_mode == "r" or operation_mode == "R":
             self.rc = ROS_RavenController(grip_type)
+            for x in xrange(7):
+	            self.rc.scaleUp()
         #self.consoleBased()
         #self.pygameBased()
 
